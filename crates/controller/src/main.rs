@@ -6102,6 +6102,7 @@ mod tests {
             ("GET", "/streams/missing", vec![]),
             ("DELETE", "/streams/basic", vec![("if-match", "\"stale\"")]),
             ("POST", "/streams", vec![("if-none-match", "*")]),
+            ("HEAD", "/streams/basic", vec![]),
             ("GET", "/no-such-route", vec![]),
         ] {
             let body = (method == "POST").then(|| definition.clone());
@@ -6143,6 +6144,67 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
         assert_eq!(headers[header::WWW_AUTHENTICATE], "Bearer");
+    }
+
+    #[tokio::test]
+    async fn a_standby_drops_the_headers_a_connection_header_names() {
+        let leader = serve_on_loopback(Router::new().fallback(|headers: HeaderMap| async move {
+            (
+                [
+                    ("connection", "x-server-hop"),
+                    ("x-server-hop", "private"),
+                    ("x-end-to-end", "kept"),
+                ],
+                Json(json!({ "client_hop": headers.contains_key("x-client-hop") })),
+            )
+        }))
+        .await;
+        let standby = api_gate_for(&following(&leader));
+
+        let (status, headers, body) = send_with_headers(
+            &standby,
+            "GET",
+            "/streams",
+            None,
+            &[("connection", "x-client-hop"), ("x-client-hop", "private")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["client_hop"], false);
+        assert!(!headers.contains_key("x-server-hop"), "{headers:?}");
+        assert_eq!(headers["x-end-to-end"], "kept");
+    }
+
+    #[tokio::test]
+    async fn a_standby_forwards_to_the_leader_it_followed_last() {
+        let (first_state, _first_mem) = mem_state();
+        let (second_state, _second_mem) = mem_state();
+        let mut leaders = Vec::new();
+        for (state, name) in [(&first_state, "first"), (&second_state, "second")] {
+            let app = api_listener(open_router(state.clone()), None);
+            let created = serde_json::to_value(stream(name)).unwrap();
+            assert_eq!(
+                send(&app, "POST", "/streams", Some(created)).await.0,
+                StatusCode::ACCEPTED
+            );
+            leaders.push(serve_on_loopback(app).await);
+        }
+        let standby = following(&leaders[0]);
+        let gate = api_gate_for(&standby);
+        assert_eq!(
+            send(&gate, "GET", "/streams/first", None).await.0,
+            StatusCode::OK
+        );
+
+        standby.follow(Some(leaders[1].clone()));
+        assert_eq!(
+            send(&gate, "GET", "/streams/first", None).await.0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            send(&gate, "GET", "/streams/second", None).await.0,
+            StatusCode::OK
+        );
     }
 
     #[tokio::test]
@@ -6781,6 +6843,54 @@ mod tests {
             before,
             "the new leader serves the same hops, generations and ETags"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a running Postgres via DATABASE_URL"]
+    async fn a_standby_follows_the_lease_to_the_next_leader() {
+        let url = store::tests::fresh_database().await;
+        let seed = store::tests::leading_pg_store(&url).await;
+        seed_restart_case(&seed).await;
+        seed.create_stream_set(
+            "production",
+            &[stream_between("owned", "restart-node-2", "restart-node-1")],
+            true,
+        )
+        .await
+        .unwrap();
+        seed.release_lease().await.unwrap();
+        let timing = LeaseTiming::new(Duration::from_secs(3));
+
+        let (_first_pg, first, stop_first, first_run) = start_controller(&url, timing).await;
+        until_leading(&first, Duration::from_secs(5)).await;
+        let before = served_state(&api_gate_for(&first)).await;
+        let (_second_pg, second, _stop_second, _second_run) = start_controller(&url, timing).await;
+        let (_third_pg, third, _stop_third, _third_run) = start_controller(&url, timing).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        stop_first.send(()).unwrap();
+        first_run.await.unwrap().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let standby = loop {
+            match (second.leading(), third.leading()) {
+                (Some(_), None) => break third.clone(),
+                (None, Some(_)) => break second.clone(),
+                _ => {
+                    assert!(Instant::now() < deadline, "no controller took over");
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
+        };
+        let gate = api_gate_for(&standby);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while send(&gate, "GET", "/streams/restart", None).await.0 != StatusCode::OK {
+            assert!(
+                Instant::now() < deadline,
+                "the standby never forwarded to the new leader"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(served_state(&gate).await, before);
     }
 
     #[tokio::test]
@@ -8402,15 +8512,22 @@ mod args_tests {
             Args::try_parse_from(std::iter::once("weave-controller").chain(args.iter().copied()))
         };
         assert!(parse(&["--advertise-url", "http://controller-1:8082"]).is_err());
-        assert!(
-            parse(&[
-                "--database-url",
-                "postgres://db/weave",
-                "--advertise-url",
-                "controller-1:8082"
-            ])
-            .is_err()
-        );
+        for unusable in [
+            "controller-1:8082",
+            "http://controller-1:8082/?x",
+            "http://controller-1:8082/#x",
+        ] {
+            assert!(
+                parse(&[
+                    "--database-url",
+                    "postgres://db/weave",
+                    "--advertise-url",
+                    unusable
+                ])
+                .is_err(),
+                "{unusable}"
+            );
+        }
         let args = parse(&[
             "--database-url",
             "postgres://db/weave",

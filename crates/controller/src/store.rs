@@ -66,6 +66,9 @@ pub enum StoreError {
 
 const SCHEMA_VERSION: i32 = 4;
 
+const LEASE_ADDRESS_MIGRATION: &str =
+    "ALTER TABLE controller_lease ADD COLUMN IF NOT EXISTS address TEXT";
+
 const LOCAL_ENDPOINT_MIGRATION: [&str; 2] = [
     "UPDATE streams
         SET definition = jsonb_set(definition, '{source}', jsonb_build_object('input',
@@ -246,7 +249,7 @@ impl PgStore {
                 steps.extend(LOCAL_ENDPOINT_MIGRATION);
             }
             if found < 4 {
-                steps.push("ALTER TABLE controller_lease ADD COLUMN IF NOT EXISTS address TEXT");
+                steps.push(LEASE_ADDRESS_MIGRATION);
             }
             for step in steps {
                 sqlx::query(step)
@@ -361,7 +364,7 @@ impl PgStore {
         .execute(&mut *transaction)
         .await
         .map_err(StoreError::Query)?;
-        sqlx::query("ALTER TABLE controller_lease ADD COLUMN IF NOT EXISTS address TEXT")
+        sqlx::query(LEASE_ADDRESS_MIGRATION)
             .execute(&mut *transaction)
             .await
             .map_err(StoreError::Query)?;

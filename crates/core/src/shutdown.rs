@@ -1,7 +1,5 @@
 use std::io;
 
-use crate::logging::ErrorChain;
-
 pub async fn signal() -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -14,16 +12,6 @@ pub async fn signal() -> io::Result<()> {
     }
     #[cfg(not(unix))]
     tokio::signal::ctrl_c().await
-}
-
-pub async fn graceful(name: &str) {
-    match signal().await {
-        Ok(()) => tracing::info!("{name} shutting down"),
-        Err(error) => {
-            tracing::error!(error = %ErrorChain(&error), "cannot listen for shutdown signals; {name} will not stop on them");
-            std::future::pending::<()>().await;
-        }
-    }
 }
 
 #[cfg(all(test, unix))]

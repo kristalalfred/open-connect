@@ -11,9 +11,8 @@ both to the leader (see [Forwarding](operations.md#forwarding)).
 
 Routes carry no version before a stable release. Routes, payloads and error
 shapes can change between pre-release versions without aliases or a deprecation
-window. A prefixed route such as `/v1/status` returns `404 route_not_found`.
-The controller checks the token first, so with authentication on, a request
-without a valid token gets `401` instead.
+window. A prefixed route such as `/v1/status` returns `404 route_not_found`,
+with or without a token.
 
 Outside the contracts:
 

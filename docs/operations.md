@@ -95,7 +95,9 @@ are initialized at that version. Older versions migrate in one transaction:
 
 Existing stream definitions, generations and ETags are preserved. Other versions
 are refused without changing the database. Back up the database before
-upgrading; older controllers refuse version `4`.
+upgrading, and stop every older controller before starting a newer one: an older
+controller checks the version only when it starts, and one still running keeps
+taking and renewing the lease without recording its URL.
 
 ### Forwarding
 

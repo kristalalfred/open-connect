@@ -51,10 +51,17 @@ impl FromStr for ControllerUrl {
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
         let base = raw.trim().trim_end_matches('/');
         match reqwest::Url::parse(base) {
-            Ok(url) if matches!(url.scheme(), "http" | "https") && url.host().is_some() => {
+            Ok(url)
+                if matches!(url.scheme(), "http" | "https")
+                    && url.host().is_some()
+                    && url.query().is_none()
+                    && url.fragment().is_none() =>
+            {
                 Ok(Self(base.to_string()))
             }
-            _ => Err(format!("{raw:?} is not an http or https URL with a host")),
+            _ => Err(format!(
+                "{raw:?} is not an http or https URL with a host and no query or fragment"
+            )),
         }
     }
 }
@@ -235,7 +242,6 @@ impl Forwarder {
         match answer {
             Ok((status, mut headers, body)) => {
                 without_hop_by_hop(&mut headers);
-                headers.remove(header::CONTENT_LENGTH);
                 let mut response = (status, Body::from(body)).into_response();
                 response.headers_mut().extend(headers);
                 response
@@ -261,7 +267,14 @@ impl Forwarder {
 }
 
 fn without_hop_by_hop(headers: &mut HeaderMap) {
-    for name in &HOP_BY_HOP {
+    let nominated: Vec<HeaderName> = headers
+        .get_all(header::CONNECTION)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .filter_map(|name| HeaderName::from_bytes(name.trim().as_bytes()).ok())
+        .collect();
+    for name in nominated.iter().chain(&HOP_BY_HOP) {
         headers.remove(name);
     }
 }
@@ -436,7 +449,7 @@ async fn wait_for_lease(
                     tracing::info!("another controller holds the lease");
                     held_elsewhere = true;
                 }
-                follow_leader(pg, leadership, deadline).await;
+                follow_leader(pg, address, leadership, deadline).await;
             }
             Ok(Err(err)) => {
                 tracing::warn!(error = %ErrorChain(&err), "taking the controller lease failed; retrying")
@@ -450,16 +463,25 @@ async fn wait_for_lease(
     }
 }
 
-async fn follow_leader(pg: &PgStore, leadership: &Leadership, deadline: Instant) {
+async fn follow_leader(
+    pg: &PgStore,
+    own: Option<&str>,
+    leadership: &Leadership,
+    deadline: Instant,
+) {
     match tokio::time::timeout_at(deadline.into(), pg.leader_address()).await {
-        Ok(Ok(address)) => leadership.follow(address.and_then(|address| {
+        Ok(Ok(address)) => leadership.follow(
             address
+                .filter(|address| Some(address.as_str()) != own)
+                .and_then(|address| {
+                    address
                 .parse()
                 .inspect_err(
                     |reason| tracing::warn!(%reason, "the lease names an unusable leader URL"),
                 )
                 .ok()
-        })),
+                }),
+        ),
         Ok(Err(err)) => {
             tracing::warn!(error = %ErrorChain(&err), "reading the leading controller's URL failed")
         }

@@ -25,11 +25,11 @@ Each node has its own token, at an epoch that is a non-negative integer:
 <node id>.<epoch>.<lowercase hex HMAC-SHA256(WEAVE_SOUTHBOUND_KEY, "<node id>.<epoch>")>
 ```
 
-The controller recomputes the MAC and read the node id from the
-token. They keep no list of nodes, so adding a node needs a new token and no
+The controller recomputes the MAC and reads the node id from the token. It keeps
+no list of nodes, so adding a node needs a new token and no
 restart. The key must be at least 32 characters, for example
 `openssl rand -hex 32`, because a leaked token is enough to test guesses of a
-short key offline. Both services refuse to start with a shorter key, and
+short key offline. The controller refuses to start with a shorter key, and
 `weave node-token` refuses one.
 
 `weave node-token <id>` prints a node's token at epoch 0, and `--epoch <n>` at
@@ -63,8 +63,8 @@ Mint the node a token at a higher epoch and raise its minimum in
 `WEAVE_SOUTHBOUND_MIN_EPOCHS`, given to every controller as comma-separated
 `<node id>=<epoch>` pairs, such as `strom-node-1=2,guest-1=1`. A token below its
 node's minimum gets `401`. A node the variable does not name accepts every
-epoch. The controller reads the variable at startup and refuse to
-start when it does not parse. Rotating `WEAVE_SOUTHBOUND_KEY` replaces every
+epoch. The controller reads the variable at startup and refuses to start when it
+does not parse. Rotating `WEAVE_SOUTHBOUND_KEY` replaces every
 node's token.
 
 ### Failing closed
