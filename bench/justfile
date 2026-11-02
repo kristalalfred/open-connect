@@ -1,11 +1,12 @@
 compose   := "docker compose -f " + source_directory() / "docker-compose.yml"
 scripts   := source_directory() / "scripts"
 manifests := source_directory() / "manifests"
-nb      := "https://localhost:29443"
-sb      := "https://localhost:29444"
-sb_plain := "http://localhost:29081"
+api     := "https://localhost:29443"
+api_plain := "http://localhost:29080"
 ctrl    := "http://localhost:29082"
 ctrl2   := "http://localhost:29083"
+dash    := "http://localhost:29092"
+dash2   := "http://localhost:29093"
 strom1  := "http://localhost:28080"
 strom2  := "http://localhost:28081"
 strom3  := "http://localhost:28082"
@@ -14,7 +15,7 @@ page_dir := source_directory() / ".." / "nodes" / "browser"
 
 ca  := source_directory() / "tls" / "public" / "ca.pem"
 tls := "--cacert " + ca
-cli := "SSL_CERT_FILE=" + ca + " WEAVE_NORTHBOUND_URL=" + nb + " cargo run --quiet -p weave-cli --"
+cli := "SSL_CERT_FILE=" + ca + " WEAVE_NORTHBOUND_URL=" + api + " cargo run --quiet -p weave-cli --"
 
 nb_token := env("WEAVE_NORTHBOUND_TOKEN", "bench-northbound-token")
 nb_auth  := "-H 'Authorization: Bearer " + nb_token + "'"
@@ -47,8 +48,7 @@ up:
 wait:
     @echo "waiting for stack..."
     @for i in $(seq 1 90); do \
-        curl -sf {{tls}} {{nb}}/health >/dev/null 2>&1 && \
-        curl -sf {{tls}} {{sb}}/health >/dev/null 2>&1 && \
+        curl -sf {{tls}} {{api}}/health >/dev/null 2>&1 && \
         curl -sf {{ctrl}}/health >/dev/null 2>&1 && \
         curl -sf {{ctrl2}}/health >/dev/null 2>&1 && \
         curl -sf {{strom_auth}} {{strom1}}/api/version >/dev/null 2>&1 && \
@@ -86,8 +86,7 @@ logs svc="controller":
 [group("stack")]
 status:
     @echo "== health =="
-    @printf "northbound:  "; curl -sf {{tls}} {{nb}}/health >/dev/null && echo ok || echo DOWN
-    @printf "southbound:  "; curl -sf {{tls}} {{sb}}/health >/dev/null && echo ok || echo DOWN
+    @printf "edge:        "; curl -sf {{tls}} {{api}}/health >/dev/null && echo ok || echo DOWN
     @printf "controller:  "; curl -sf {{ctrl}}/health >/dev/null && echo ok || echo DOWN
     @printf "controller-2:"; curl -sf {{ctrl2}}/health >/dev/null && echo " ok" || echo " DOWN"
     @printf "leading:     "; just leader 2>&1 || true
@@ -95,14 +94,14 @@ status:
     @printf "strom-2:     "; curl -sf {{strom_auth}} {{strom2}}/api/version >/dev/null && echo ok || echo DOWN
     @printf "strom-3:     "; curl -sf {{strom_auth}} {{strom3}}/api/version >/dev/null && echo ok || echo DOWN
     @printf "strom-4:     "; curl -sf {{strom_auth}} {{strom4}}/api/version >/dev/null && echo ok || echo DOWN
-    @echo "== registered nodes (southbound) =="
-    @curl -sf {{tls}} {{sb_auth}} {{sb}}/nodes | (jq . 2>/dev/null || cat)
-    @echo "== /status (northbound, from the leading controller) =="
-    @curl -sf {{tls}} {{nb_auth}} {{nb}}/status | (jq . 2>/dev/null || cat)
-    @echo "== streams (northbound) =="
-    @curl -sf {{tls}} {{nb_auth}} {{nb}}/streams | (jq . 2>/dev/null || cat)
+    @echo "== registered nodes (node token) =="
+    @curl -sf {{tls}} {{sb_auth}} {{api}}/nodes | (jq . 2>/dev/null || cat)
+    @echo "== /status (from the leading controller) =="
+    @curl -sf {{tls}} {{nb_auth}} {{api}}/status | (jq . 2>/dev/null || cat)
+    @echo "== streams =="
+    @curl -sf {{tls}} {{nb_auth}} {{api}}/streams | (jq . 2>/dev/null || cat)
 
-[doc("Check that a node token acts only for its own node.")]
+[doc("Check that a node token acts only for its own node, through the edge and through each controller.")]
 [group("stack")]
 auth-check:
     #!/usr/bin/env bash
@@ -110,8 +109,6 @@ auth-check:
     me="Authorization: Bearer {{sb_token}}"
     json="Content-Type: application/json"
     heartbeat='{"node_id":"strom-node-2","status":"ready","endpoints":[],"hop_status":[]}'
-    leader="$(just leader)" || exit 1
-    read -r _ ctrl <<<"$leader"
     failed=0
     expect() {
         local want="$1" what="$2"; shift 2
@@ -119,14 +116,16 @@ auth-check:
         printf '%-46s %s\n' "$what" "$got"
         [ "$got" = "$want" ] || { echo "  expected $want" >&2; failed=1; }
     }
-    expect 200 "southbound: desired hops as strom-node-1" -H "$me" {{sb}}/nodes/strom-node-1/desired
-    expect 403 "southbound: desired hops as strom-node-2" -H "$me" {{sb}}/nodes/strom-node-2/desired
-    expect 403 "southbound: heartbeat as strom-node-2" -H "$me" -H "$json" -d "$heartbeat" {{sb}}/nodes/strom-node-2/heartbeat
-    expect 403 "southbound: register as strom-node-2" -H "$me" -H "$json" -d '{"node":{"id":"strom-node-2"}}' {{sb}}/nodes/register
-    expect 403 "controller: desired hops as strom-node-2" -H "$me" "$ctrl/nodes/strom-node-2/desired"
-    expect 403 "controller: heartbeat as strom-node-2" -H "$me" -H "$json" -d "$heartbeat" "$ctrl/nodes/strom-node-2/heartbeat"
-    expect 401 "southbound: old shared token" -H "Authorization: Bearer bench-southbound-token" {{sb}}/nodes
-    expect 401 "southbound: the key as a token" -H "Authorization: Bearer {{sb_key}}" {{sb}}/nodes
+    for pair in "edge {{api}}" "controller {{ctrl}}" "controller-2 {{ctrl2}}"; do
+        read -r via url <<<"$pair"
+        expect 200 "$via: desired hops as strom-node-1" -H "$me" "$url/nodes/strom-node-1/desired"
+        expect 403 "$via: desired hops as strom-node-2" -H "$me" "$url/nodes/strom-node-2/desired"
+        expect 403 "$via: heartbeat as strom-node-2" -H "$me" -H "$json" -d "$heartbeat" "$url/nodes/strom-node-2/heartbeat"
+        expect 403 "$via: register as strom-node-2" -H "$me" -H "$json" -d '{"node":{"id":"strom-node-2"}}' "$url/nodes/register"
+        expect 401 "$via: streams with a node token" -H "$me" "$url/streams"
+        expect 401 "$via: old shared token" -H "Authorization: Bearer bench-southbound-token" "$url/nodes"
+        expect 401 "$via: the key as a token" -H "Authorization: Bearer {{sb_key}}" "$url/nodes"
+    done
     exit "$failed"
 
 [doc("Check that the TLS endpoints verify against the bench CA, and fail without it.")]
@@ -140,11 +139,10 @@ tls-check:
         if "$@" >/dev/null 2>&1; then r=yes; else r=NO; failed=1; fi
         printf '%-56s %s\n' "$what" "$r"
     }
-    check "curl verifies northbound against the bench CA" curl -sf {{tls}} {{nb}}/health
-    check "curl verifies southbound against the bench CA" curl -sf {{tls}} {{sb}}/health
-    check "curl without the bench CA refuses southbound" sh -c 'curl -s {{sb}}/health; [ $? -eq 60 ]'
+    check "curl verifies the API against the bench CA" curl -sf {{tls}} {{api}}/health
+    check "curl without the bench CA refuses the API" sh -c 'curl -s {{api}}/health; [ $? -eq 60 ]'
     check "weave trusts the bench CA from SSL_CERT_FILE" env WEAVE_NORTHBOUND_TOKEN={{nb_token}} {{cli}} get status
-    check "weave without SSL_CERT_FILE refuses the certificate" sh -c 'env -u SSL_CERT_FILE WEAVE_NORTHBOUND_TOKEN={{nb_token}} cargo run --quiet -p weave-cli -- --url {{nb}} get status 2>&1 | grep -q UnknownIssuer'
+    check "weave without SSL_CERT_FILE refuses the certificate" sh -c 'env -u SSL_CERT_FILE WEAVE_NORTHBOUND_TOKEN={{nb_token}} cargo run --quiet -p weave-cli -- --url {{api}} get status 2>&1 | grep -q UnknownIssuer'
     exit "$failed"
 
 [group("streams")]
@@ -167,7 +165,7 @@ stream-up name="basic":
     set -euo pipefail
     WEAVE_BENCH_DRIVING=1 just stream {{name}}
     for _ in $(seq 1 10); do
-        placed="$(curl -sf {{tls}} {{nb_auth}} {{nb}}/status \
+        placed="$(curl -sf {{tls}} {{nb_auth}} {{api}}/status \
             | jq -r --arg n {{name}} '.streams[] | select(.name==$n) | .status' 2>/dev/null || true)"
         [ -n "$placed" ] && [ "$placed" != "pending" ] && break
         sleep 2
@@ -186,7 +184,7 @@ stream-up name="basic":
     first="$(printf '%s\n' "$ids" | awk '{print $1}')"
     second="$(printf '%s\n' "$ids" | awk '{print $2}')"
     echo "{{name}} placed with $outputs receiver output(s); attaching endpoints"
-    spec="$(curl -sf {{tls}} {{nb_auth}} {{nb}}/streams/{{name}})"
+    spec="$(curl -sf {{tls}} {{nb_auth}} {{api}}/streams/{{name}})"
     passphrase() { printf '%s' "$spec" | jq -r "$1 // empty"; }
     destination_passphrase() {
         passphrase ".spec.destinations[] | select(.id==\"$1\") | .srt.passphrase"
@@ -214,13 +212,13 @@ stream-wait name status="flowing" attempts="45":
     #!/usr/bin/env bash
     set -euo pipefail
     for _ in $(seq 1 {{attempts}}); do
-        got="$(curl -sf {{tls}} {{nb_auth}} {{nb}}/status \
+        got="$(curl -sf {{tls}} {{nb_auth}} {{api}}/status \
             | jq -r --arg n {{name}} '.streams[] | select(.name==$n) | .status' 2>/dev/null || true)"
         if [ "$got" = "{{status}}" ]; then echo "{{name}}: {{status}}"; exit 0; fi
         sleep 2
     done
     echo "{{name}}: timed out waiting for {{status}} (last: ${got:-unknown})" >&2
-    echo "inspect with 'just bench status' or the leading controller's dashboard at {{ctrl}}/ui or {{ctrl2}}/ui" >&2
+    echo "inspect with 'just bench status' or the leading controller's dashboard at {{dash}}/ui or {{dash2}}/ui" >&2
     exit 1
 
 [group("streams")]
@@ -228,29 +226,29 @@ stream-rm name:
     #!/usr/bin/env bash
     set -euo pipefail
     headers="$(mktemp)"; body="$(mktemp)"; trap 'rm -f "$headers" "$body"' EXIT
-    status="$(curl -s -o "$body" -D "$headers" -w '%{http_code}' {{tls}} {{nb_auth}} {{nb}}/streams/{{name}} || true)"
+    status="$(curl -s -o "$body" -D "$headers" -w '%{http_code}' {{tls}} {{nb_auth}} {{api}}/streams/{{name}} || true)"
     case "$status" in
         200) ;;
         404) echo "not found: {{name}}"; exit 0 ;;
-        *) echo "cannot read {{name}}: northbound returned $status $(cat "$body")" >&2; exit 1 ;;
+        *) echo "cannot read {{name}}: the API returned $status $(cat "$body")" >&2; exit 1 ;;
     esac
     etag="$(awk 'tolower($1) == "etag:" { print $2 }' "$headers" | tr -d '\r')"
     status="$(curl -s -o "$body" -w '%{http_code}' {{tls}} {{nb_auth}} -H "If-Match: $etag" \
-        -X DELETE {{nb}}/streams/{{name}} || true)"
+        -X DELETE {{api}}/streams/{{name}} || true)"
     case "$status" in
         204) echo "deleted {{name}}" ;;
         404) echo "not found: {{name}}" ;;
-        *) echo "cannot delete {{name}}: northbound returned $status $(cat "$body")" >&2; exit 1 ;;
+        *) echo "cannot delete {{name}}: the API returned $status $(cat "$body")" >&2; exit 1 ;;
     esac
 
 [group("stack")]
 leader:
     #!/usr/bin/env bash
     set -uo pipefail
-    for pair in "controller {{ctrl}}" "controller-2 {{ctrl2}}"; do
-        read -r svc url <<<"$pair"
-        if [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/status")" = 200 ]; then
-            echo "$svc $url"
+    for pair in "controller {{dash}}" "controller-2 {{dash2}}"; do
+        read -r svc dashboard <<<"$pair"
+        if [ "$(curl -s -o /dev/null -w '%{http_code}' "$dashboard/status")" = 200 ]; then
+            echo "$svc $dashboard"
             exit 0
         fi
     done
@@ -282,13 +280,13 @@ controller-restart stream="basic" how="restart":
         done | sort
     }
     identity() {
-        etag="$(curl -sf {{tls}} -D - -o /dev/null {{nb_auth}} {{nb}}/streams/{{stream}} \
+        etag="$(curl -sf {{tls}} -D - -o /dev/null {{nb_auth}} {{api}}/streams/{{stream}} \
             | tr -d '\r' | awk 'tolower($1) == "etag:" { print $2 }')"
-        generation="$(curl -sf {{tls}} {{nb_auth}} {{nb}}/streams/{{stream}} | jq .generation)"
+        generation="$(curl -sf {{tls}} {{nb_auth}} {{api}}/streams/{{stream}} | jq .generation)"
         echo "etag $etag generation $generation"
     }
     leader="$(just leader)"
-    read -r old old_url <<<"$leader"
+    read -r old old_dashboard <<<"$leader"
     echo "leading: $old"
     before="$(snapshot)"
     identity_before="$(identity)"
@@ -343,7 +341,7 @@ controller-restart stream="basic" how="restart":
             failed=1
         fi
     done
-    offline="$(curl -sf {{tls}} {{nb_auth}} {{nb}}/nodes \
+    offline="$(curl -sf {{tls}} {{nb_auth}} {{api}}/nodes \
         | jq -r '.[].node | select((.id | startswith("strom-node-")) and .status == "offline") | .id')"
     if [ -n "$offline" ]; then
         echo "FAIL: offline after the switch: $offline" >&2
@@ -359,11 +357,11 @@ controller-restart stream="basic" how="restart":
     if [ "{{how}}" = stop ]; then
         {{compose}} start "$old"
         for _ in $(seq 1 30); do
-            curl -sf "$old_url/health" >/dev/null 2>&1 && break
+            curl -sf "$old_dashboard/health" >/dev/null 2>&1 && break
             sleep 1
         done
         sleep 3
-        code="$(curl -s "$old_url/status" | jq -r .code)"
+        code="$(curl -s "$old_dashboard/status" | jq -r .code)"
         leader="$(just leader)" || true
         read -r leading _ <<<"$leader"
         echo "$old is back: /status says ${code}; $leading leads"
@@ -429,12 +427,12 @@ browser-id node=browser_node svc="browser":
     #!/usr/bin/env bash
     set -euo pipefail
     for _ in $(seq 1 30); do
-        got="$(curl -sf {{tls}} {{sb_auth}} {{sb}}/nodes \
+        got="$(curl -sf {{tls}} {{sb_auth}} {{api}}/nodes \
             | jq -r --arg id '{{node}}' '.[].node | select(.id==$id) | .id' 2>/dev/null || true)"
         if [ -n "$got" ]; then echo "$got"; exit 0; fi
         sleep 2
     done
-    echo "{{node}} has not registered with southbound;" \
+    echo "{{node}} has not registered;" \
          "'just bench logs {{svc}}' shows why, 'just bench status' lists the nodes there are" >&2
     exit 1
 
@@ -484,7 +482,7 @@ browser-down:
 [doc("Serve nodes/browser on localhost:<port> pinned to <seat>, for a browser on this host; prints the URL to open.")]
 [group("browser")]
 page port="8000" seat="guest-1":
-    @echo "open  http://localhost:{{port}}/#southbound={{sb_plain}}&token=$(just node-token {{seat}})&node={{seat}}&network=docker-host"
+    @echo "open  http://localhost:{{port}}/#southbound={{api_plain}}&token=$(just node-token {{seat}})&node={{seat}}&network=docker-host"
     python3 -m http.server {{port}} -d {{page_dir}} --bind 127.0.0.1
 
 [group("browser")]
@@ -502,7 +500,7 @@ host-cam seat="guest-1":
     seat_auth="Authorization: Bearer $(just node-token {{seat}})"
     url=""
     for _ in $(seq 1 15); do
-        url="$(curl -sf {{tls}} -H "$seat_auth" {{sb}}/nodes/{{seat}}/desired \
+        url="$(curl -sf {{tls}} -H "$seat_auth" {{api}}/nodes/{{seat}}/desired \
             | jq -r '.[] | select(.id=="weave-browser-cam-host-sender") | .egresses[0].url' 2>/dev/null || true)"
         [ -n "$url" ] && break
         sleep 2

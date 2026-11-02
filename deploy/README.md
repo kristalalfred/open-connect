@@ -1,7 +1,7 @@
 # Deploying open-weave
 
-- `control-plane/`: northbound, southbound, two controllers, Postgres and an
-  nginx that terminates TLS.
+- `control-plane/`: two controllers, Postgres and an nginx that terminates TLS
+  in front of both controllers.
 - `node/`: Strom, the Strom adapter and a `node.yaml` template, for each media
   node.
 
@@ -15,9 +15,8 @@ For a local build, run `docker build -t open-weave:local .` at the repository
 root and set `WEAVE_IMAGE=open-weave:local` in each kit's `.env`. Build or load
 the image on each host that runs a kit.
 
-The image holds `weave`, `weave-northbound`, `weave-southbound`,
-`weave-controller`, `weave-adapter-strom` and `weave-node`, runs as uid 10001 and starts under
-`tini`.
+The image holds `weave`, `weave-controller`, `weave-adapter-strom` and
+`weave-node`, runs as uid 10001 and starts under `tini`.
 
 ## Control plane
 
@@ -34,21 +33,22 @@ The image holds `weave`, `weave-northbound`, `weave-southbound`,
 
 | Port | Service | Open to |
 |---|---|---|
-| 443 | nginx to northbound | operators |
-| 8443 | nginx to southbound | every node |
-| 8082, 8083 | controller dashboards at `/ui` | published on `127.0.0.1` only |
+| 443 | nginx to both controllers' APIs | operators and every node |
+| 8090, 8091 | controller dashboards at `/ui` | published on `127.0.0.1` only |
 
-Postgres and the plain HTTP ports of northbound (9080) and southbound (8081)
-are reachable only on the Compose network. Controller ports are published on
-loopback.
+nginx sends each request to either controller, and moves to the other when it
+cannot connect within two seconds. The standby forwards to the leader (see
+[Forwarding](../docs/operations.md#forwarding)). Each controller advertises its
+Compose service name, such as `http://controller-1:8082`. Postgres and the
+controllers' API port 8082 are reachable only on the Compose network.
 
 ### Minting node tokens
 
 A node's token is derived from `WEAVE_SOUTHBOUND_KEY`, and minting one calls no
-service. The southbound container holds the key, so in `control-plane/`:
+service. The controller containers hold the key, so in `control-plane/`:
 
 ```sh
-docker compose exec southbound weave node-token strom-node-1
+docker compose exec controller-1 weave node-token strom-node-1
 ```
 
 A `weave` outside the container mints the same token with the key in its
@@ -68,7 +68,7 @@ export WEAVE_NORTHBOUND_TOKEN=...
 weave --url https://<control-plane-host> get nodes
 ```
 
-`--url` (or `WEAVE_NORTHBOUND_URL`) defaults to `http://127.0.0.1:9080`. When
+`--url` (or `WEAVE_NORTHBOUND_URL`) defaults to `http://127.0.0.1:8082`. When
 the certificate in `control-plane/tls/` is signed by a private CA, set
 `SSL_CERT_FILE` to the CA as a PEM file (see [TLS](../docs/security.md#tls)).
 
@@ -87,7 +87,7 @@ See [Operations](../docs/operations.md) for configuration and failover, and
 Run on each media node host.
 
 1. Copy `node/node.yaml` and replace every `<placeholder>`. `node.id` must match
-   the id the token was minted for. `southbound_url` is the control plane's 8443.
+   the id the token was minted for. `southbound_url` is the control plane's HTTPS URL.
    The `listeners` addresses are what other nodes dial to reach this node's Strom.
 2. Copy `node/env.example` to `node/.env`. Set `WEAVE_SOUTHBOUND_TOKEN` to the
    node's token and `STROM_API_KEY` to the output of `openssl rand -hex 32`.
@@ -108,7 +108,7 @@ Strom runs `eyevinntechnology/strom:0.6.10`, the version the bench runs. Both
 containers use host networking, so the SRT port range in `node.yaml` is the
 host's own. The host must support Docker host networking.
 
-If southbound's certificate is signed by a private CA, mount the CA as a PEM file
+If the control plane's certificate is signed by a private CA, mount the CA as a PEM file
 in the adapter container and set `SSL_CERT_FILE` to it.
 
 ### Node ports
@@ -119,7 +119,7 @@ in the adapter container and set `SSL_CERT_FILE` to it.
 | 8080 | TCP | Only if the node serves WHIP or WHEP. This is also Strom's own API, which requires `STROM_API_KEY` (see [Strom's API key](#stroms-api-key)). |
 | 8091 | TCP | The adapter's `/health`. Nothing needs it beyond your own monitoring. |
 
-The node dials out to the control plane on 8443.
+The node dials out to the control plane on 443.
 
 ## First stream
 

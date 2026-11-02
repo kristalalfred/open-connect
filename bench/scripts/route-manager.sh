@@ -4,7 +4,7 @@ set -uo pipefail
 interval="${ROUTE_INTERVAL:-3}"
 sock="${DOCKER_SOCK:-/var/run/docker.sock}"
 
-core_containers="ow-controller ow-controller-2 ow-southbound ow-tls ow-browser ow-browser-2 ow-open-live-strom ow-producer ow-consumer ow-consumer-2"
+core_containers="ow-controller ow-controller-2 ow-tls ow-browser ow-browser-2 ow-open-live-strom ow-producer ow-consumer ow-consumer-2"
 core_routes="10.97.26.0/24=10.97.25.11 10.97.27.0/24=10.97.25.12"
 
 node1_containers="ow-strom-1 ow-adapter-1"

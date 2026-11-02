@@ -1,27 +1,30 @@
 # HTTP API
 
-Northbound serves the operator contract and southbound the adapter contract.
-Both are stateless proxies onto the controller, which serves both.
+The controller serves two contracts on its API listener: the northbound API for
+operators and the southbound API for adapters. A standby controller forwards
+both to the leader (see [Forwarding](operations.md#forwarding)).
 
-| Contract | Served by | Routes |
-|---|---|---|
-| operator | northbound, controller | `/streams`, `/streams/{name}`, `/streams/{name}/endpoints`, `/stream-sets`, `/stream-sets/{owner}`, `/stream-plans`, `/nodes`, `/status` |
-| adapter | southbound, controller | `/nodes/register`, `/nodes/{id}/heartbeat`, `/nodes/{id}/desired`, `/nodes`, `/endpoints`, `/state` |
+| Contract | Routes |
+|---|---|
+| northbound (operator) | `/streams`, `/streams/{name}`, `/streams/{name}/endpoints`, `/stream-sets`, `/stream-sets/{owner}`, `/stream-plans`, `/nodes`, `/status` |
+| southbound (adapter) | `/nodes/register`, `/nodes/{id}/heartbeat`, `/nodes/{id}/desired`, `/nodes/{id}/signalling`, `/nodes`, `/endpoints`, `/state` |
 
 Routes carry no version before a stable release. Routes, payloads and error
 shapes can change between pre-release versions without aliases or a deprecation
 window. A prefixed route such as `/v1/status` returns `404 route_not_found`.
-Northbound and southbound check the token first, so with authentication on, a
-request without a valid token gets `401` instead.
+The controller checks the token first, so with authentication on, a request
+without a valid token gets `401` instead.
 
 Outside the contracts:
 
-- `/health` on every service and the Strom adapter, for healthchecks and load
-  balancers. Its JSON body has `status: "ok"` and `version` set to the running binary's
-  version.
-- `/`, `/ui` and `/view` on the controller: the dashboard and its data. `/view`
-  has no stability guarantee and can change in any release. Script against
-  `/status`.
+- `/health` on the controller's API and dashboard listeners and on the Strom
+  adapter, for healthchecks and load balancers. Its JSON body has
+  `status: "ok"` and `version` set to the running binary's version.
+- `/`, `/ui`, `/view` and `/status` on the controller's dashboard listener: the
+  dashboard and its data, without authentication. They describe the controller
+  that serves them, and a standby answers `/view` and `/status` with
+  `503 not_leader`. `/view` has no stability guarantee and can change in any
+  release. Script against `/status`.
 
 Authentication is covered in [Security](security.md).
 
@@ -89,7 +92,7 @@ context. Clients branch on `code`, not `message`.
 Stream names, node ids, destination ids, profile ids, attachment ids, network
 ids and every node reference (`node`, `via`) are 1 to 63 characters matching
 `^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`. They are not trimmed or normalized. An
-invalid id in a request path returns `400` before a proxy forwards it. A stored
+invalid id in a request path returns `400`. A stored
 node registration with an invalid id is dropped, and the node must register
 again.
 
@@ -115,9 +118,7 @@ generation and ETag.
 
 ### Validation
 
-The controller validates every write. Northbound runs the same validator first
-for early feedback, and a client posting to the controller directly gets the
-same rules. An invalid stream returns `400` with every issue and is not stored.
+The controller validates every write. An invalid stream returns `400` with every issue and is not stored.
 A stream with a field or value the API does not define is refused as
 [Compatibility](#compatibility) describes.
 
@@ -318,8 +319,8 @@ that node.
   tick, gets `404 node_not_found`.
 - A covered node with nothing to run gets `200 []`, and its adapter removes every
   hop it manages.
-- Only a `2xx` is an answer. On any other response, or when southbound is
-  unreachable, an adapter keeps what it runs and asks again on its next poll.
+- Only a `2xx` is an answer. On any other response, or when the southbound API
+  is unreachable, an adapter keeps what it runs and asks again on its next poll.
   Both shipped nodes do this and keep reporting the hops they run. The
   controller reads an empty `hop_status` as a node running nothing.
 
@@ -396,7 +397,7 @@ empty for an existing flow whose settings do not match the desired hop.
 ### Inventory
 
 `GET /nodes`, `GET /endpoints` and `GET /state` list every node, endpoint and
-hop status, and no node's desired hops. On southbound they accept any node's
-token. The controller's `GET /nodes` also accepts the northbound token, and
-leaves out `site` for a node token. Nodes the controller has not heard from read
+hop status, and no node's desired hops. They accept any node's token.
+`GET /nodes` also accepts the northbound token, and leaves out `site` for a node
+token. Nodes the controller has not heard from read
 `offline`, then drop out (see [Nodes](nodes.md#lifecycle)).

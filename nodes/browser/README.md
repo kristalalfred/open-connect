@@ -7,16 +7,16 @@ attachment, heartbeats every 5 seconds and polls desired hops every 2 seconds.
 Serve this directory and open:
 
 ```text
-http://localhost:8000/#southbound=http://localhost:8081&token=<node-token>
+http://localhost:8000/#southbound=http://localhost:8082&token=<node-token>
 ```
 
 Camera capture requires HTTPS or a localhost secure context. Cross-origin
-southbound calls require `WEAVE_SOUTHBOUND_CORS_ORIGIN` to allow the page's
+requests require `WEAVE_CORS_ORIGIN` on the controllers to allow the page's
 origin. See [Security](../../docs/security.md#browser-nodes) for tokens and CORS.
 
 | Fragment option | Meaning |
 |---|---|
-| `southbound` | Southbound base URL. |
+| `southbound` | Southbound API base URL: a controller, or a load balancer in front of the controllers. |
 | `token` | Node token, created with `weave node-token ID`. |
 | `node` | Explicit node ID; must match the token if one is supplied. |
 | `network` | Routing domain; defaults to `internet`. |
@@ -25,8 +25,8 @@ origin. See [Security](../../docs/security.md#browser-nodes) for tokens and CORS
 
 Fragments are not sent to the static server. The token supplies the default
 node ID. With neither a token nor an explicit ID, the page generates an ID and
-keeps it in session storage across reloads; southbound must then have auth
-disabled. Invalid IDs, token mismatches, and registration responses `400`, `403`
+keeps it in session storage across reloads; the controller must then run with
+authentication disabled. Invalid IDs, token mismatches, and registration responses `400`, `403`
 and `409` stop registration retries.
 
 ## Browser check
@@ -36,7 +36,7 @@ From this directory:
 ```sh
 pnpm install
 pnpm exec playwright install --no-shell chromium
-node check.mjs --southbound http://127.0.0.1:8081 --token "$(weave node-token browser-1)" --serve 8000
+node check.mjs --southbound http://127.0.0.1:8082 --token "$(weave node-token browser-1)" --serve 8000
 ```
 
 The check launches Chromium with fake devices and waits for this page's accepted
@@ -56,4 +56,4 @@ With a private CA, Node.js polling needs `NODE_EXTRA_CA_CERTS` and Chromium
 needs the CA in its trust store. The [bench](../../bench/README.md) configures both.
 
 `just browser-check` checks protocol constants and hop-status shape without a
-browser, southbound or installed packages. `just test` includes it.
+browser, a controller or installed packages. `just test` includes it.

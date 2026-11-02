@@ -17,12 +17,12 @@ steps:
     seconds: 30
     during:
       - do: service
-        service: southbound
+        service: tls
         action: stop
       - do: wait
         seconds: 20
       - do: service
-        service: southbound
+        service: tls
         action: start
       - do: await
         stream: main

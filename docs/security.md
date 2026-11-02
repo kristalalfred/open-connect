@@ -8,14 +8,14 @@ constant time and never logged.
 
 | Variable | Held by | Accepted by |
 |---|---|---|
-| `WEAVE_NORTHBOUND_TOKEN` | operators, the `weave` CLI (`--token`), northbound | northbound and the controller, on every operator route except the controller's `/status` |
-| `WEAVE_SOUTHBOUND_KEY` | southbound, the controller | nothing; node tokens are derived from it |
-| `WEAVE_SOUTHBOUND_TOKEN` | each adapter and media node, holding its own node token | southbound, the controller |
-| `WEAVE_SOUTHBOUND_MIN_EPOCHS` | southbound, the controller | nothing; the lowest token epoch each node it names may present |
+| `WEAVE_NORTHBOUND_TOKEN` | operators, the `weave` CLI (`--token`), the controller | the controller, on every northbound route |
+| `WEAVE_SOUTHBOUND_KEY` | the controller | nothing; node tokens are derived from it |
+| `WEAVE_SOUTHBOUND_TOKEN` | each adapter and media node, holding its own node token | the controller, on every southbound route |
+| `WEAVE_SOUTHBOUND_MIN_EPOCHS` | the controller | nothing; the lowest token epoch each node it names may present |
 
-The northbound token is one shared secret. Northbound presents it again to the
-controller. The controller requires the credential of the surface a route
-belongs to, so a node token cannot create streams.
+The northbound token is one shared secret. The controller requires the
+credential of the API a route belongs to, so a node token cannot create streams.
+A standby passes the `Authorization` header on to the leader, which checks it.
 
 ### Node tokens
 
@@ -25,7 +25,7 @@ Each node has its own token, at an epoch that is a non-negative integer:
 <node id>.<epoch>.<lowercase hex HMAC-SHA256(WEAVE_SOUTHBOUND_KEY, "<node id>.<epoch>")>
 ```
 
-Southbound and the controller recompute the MAC and read the node id from the
+The controller recomputes the MAC and read the node id from the
 token. They keep no list of nodes, so adding a node needs a new token and no
 restart. The key must be at least 32 characters, for example
 `openssl rand -hex 32`, because a leaked token is enough to test guesses of a
@@ -48,13 +48,11 @@ get `403`:
 { "code": "forbidden", "message": "token does not belong to node strom-node-2" }
 ```
 
-Southbound forwards the node's own `Authorization` header to the controller, and
-both check it. Nothing about a refused registration is recorded.
+Nothing about a refused registration is recorded.
 `weave-adapter-strom` exits on a `403` at registration.
 
 The inventory reads `GET /nodes`, `GET /endpoints` and `GET /state` accept any
-node's token, and the controller's `GET /nodes` also accepts the northbound
-token. They list every node, endpoint and hop status, but no node's desired
+node's token, and `GET /nodes` also accepts the northbound token. They list every node, endpoint and hop status, but no node's desired
 hops. With a node token, `GET /nodes` leaves out each node's `site`, which names
 its subnet and public addresses. The observation a node reports is served on no
 route.
@@ -62,21 +60,20 @@ route.
 ### Revoking a node
 
 Mint the node a token at a higher epoch and raise its minimum in
-`WEAVE_SOUTHBOUND_MIN_EPOCHS`, given to southbound and the controller alike as
-comma-separated `<node id>=<epoch>` pairs, such as `strom-node-1=2,guest-1=1`. A
-token below its node's minimum gets `401`. A node the variable does not name
-accepts every epoch. Both services read the variable at startup and refuse to
+`WEAVE_SOUTHBOUND_MIN_EPOCHS`, given to every controller as comma-separated
+`<node id>=<epoch>` pairs, such as `strom-node-1=2,guest-1=1`. A token below its
+node's minimum gets `401`. A node the variable does not name accepts every
+epoch. The controller reads the variable at startup and refuse to
 start when it does not parse. Rotating `WEAVE_SOUTHBOUND_KEY` replaces every
 node's token.
 
 ### Failing closed
 
-Each service refuses to start when a secret it needs is unset or empty:
+The controller and the adapter refuse to start when a secret they need is unset
+or empty:
 
-| Service | Secrets |
+| Process | Secrets |
 |---|---|
-| northbound | `WEAVE_NORTHBOUND_TOKEN` |
-| southbound | `WEAVE_SOUTHBOUND_KEY` |
 | controller | `WEAVE_NORTHBOUND_TOKEN`, `WEAVE_SOUTHBOUND_KEY`, `WEAVE_SRT_KEY_SECRET` |
 | adapter | its node token |
 
@@ -88,30 +85,29 @@ other value, including `0`, leaves it on.
 
 ### Unauthenticated routes
 
-- `/health` on every service.
-- The controller's dashboard (`/`, `/ui`, `/view`) and its `/status`, which the
-  dashboard shares data with. The dashboard is loaded in a browser and polls
-  `/view` without a token.
+- `/health` on the controller's API and dashboard listeners.
+- Everything on the controller's dashboard listener (`/`, `/ui`, `/view` and
+  `/status`). The dashboard is loaded in a browser and polls `/view` without a
+  token.
 
-`/view` exposes topology and allocated ports. Keep the controller port on a
-private network or behind a reverse proxy. The controller's `/streams` and
-`/nodes` require a token, so an exposed port leaks read-only dashboard data and
-no write access. Northbound's `/status` and `/streams/{name}/endpoints` require
-the northbound token, so operators can read a stream's addresses through
-northbound with the controller port closed.
+`/view` exposes topology and allocated ports. The dashboard listens on
+`WEAVE_DASHBOARD_ADDR`, `127.0.0.1:8090` by default, apart from the API. Keep it
+on a private network. It serves no writes. The API's `/status` and
+`/streams/{name}/endpoints` require the northbound token.
 
 ### Browser nodes
 
-A browser node presents its node token on every southbound call. The token is
+A browser node presents its node token on every southbound request. The token is
 passed in the URL fragment so it never reaches a server log. Without `#node=`,
 the page takes its node id from the token. A `#node=` naming another id is shown
 as rejected and never registers.
 
-A page on another origin needs `WEAVE_SOUTHBOUND_CORS_ORIGIN` on southbound: an
-exact origin such as `https://studio.example`, or `*` for development. When it
-is set, southbound sends CORS headers on its API routes and answers the
-preflight before the bearer check, allowing `Authorization` and `Content-Type`.
-When it is unset, cross-origin browser requests cannot register.
+A page on another origin needs `WEAVE_CORS_ORIGIN` on every controller: an exact
+origin such as `https://studio.example`, or `*` for development. When it is set,
+the controller sends CORS headers on its API listener and answers the preflight
+itself, before the bearer check and without forwarding it. It allows the `GET`
+and `POST` methods and the `Authorization` and `Content-Type` headers. When it is unset, cross-origin
+browser requests cannot register.
 
 ### Strom
 
@@ -125,12 +121,13 @@ are predictable.
 
 ## TLS
 
-The services do not serve TLS. Terminate it at a reverse proxy in front of
-northbound and southbound. The bench does this with nginx (see "TLS" in
+The controller does not serve TLS. Terminate it at a reverse proxy in front of
+the controllers' API listeners. The bench does this with nginx (see "TLS" in
 [`bench/README.md`](../bench/README.md)).
 
-The `weave` CLI, `weave-adapter-strom`, northbound and southbound calling an
-`https` controller URL, and the controller calling an `https` webhook URL trust
+The `weave` CLI and `weave-adapter-strom` calling an `https` API URL, a standby
+calling an `https` advertised URL, and the controller calling an `https`
+webhook URL trust
 the Mozilla roots built into them and the platform's certificate store.
 `SSL_CERT_FILE` set to a PEM file replaces the platform store with that file,
 which is how they trust a private CA. A browser node trusts what its
@@ -170,7 +167,7 @@ Sockets that peers outside open-weave dial, or that dial out to them, take a
   keeps `pbkeylen`, which marks a keyed socket.
 - `GET /streams`, `/streams/{name}` and the stream-set routes return the
   manifest as written, so a holder of the northbound token can read manifest
-  passphrases. Derived keys never reach northbound.
+  passphrases. Derived keys never reach the northbound API.
 - The controller stores manifest passphrases in Postgres in the clear, as part
   of the stream spec.
 - A RIST link between nodes carries no key (see

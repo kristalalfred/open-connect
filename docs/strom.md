@@ -1,7 +1,7 @@
 # Strom adapter
 
 `weave-adapter-strom` runs beside one [Strom](https://github.com/Eyevinn/strom)
-instance. It registers the node with southbound, pulls its desired hops,
+instance. It registers the node through the southbound API, pulls its desired hops,
 creates, starts and deletes Strom flows to match, and reports what Strom runs
 from polling `/api/flows`.
 
@@ -22,7 +22,7 @@ and Strom's API key from `WEAVE_STROM_TOKEN` or `strom.token` (see
   when the version is lower. A Strom that does not answer is asked again on the
   next poll, and a version string the adapter cannot read does not stop it. The
   bench and the node kit run 0.6.10.
-- Before it registers, it asks southbound for its node's desired hops, so a
+- Before it registers, it asks the southbound API for its node's desired hops, so a
   restarted adapter reports the flows Strom still runs and keeps their ports. A
   `5xx`, or no answer, delays registration to the next poll.
 - It creates and deletes no Strom flow until its first registration is accepted.
@@ -32,7 +32,7 @@ and Strom's API key from `WEAVE_STROM_TOKEN` or `strom.token` (see
 
 ## Requests
 
-Requests to Strom and to southbound connect within 2 s and fail after 10 s.
+Requests to Strom and to the southbound API connect within 2 s and fail after 10 s.
 `strom.request_timeout_secs` changes the 10 s for Strom, and
 `strom.poll_interval_secs` sets the poll interval, default 5 s. A Strom that
 does not answer counts as a failed poll: the node reads `degraded` and the

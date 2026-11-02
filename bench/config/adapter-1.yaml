@@ -1,6 +1,6 @@
 node:
   id: strom-node-1
-  southbound_url: https://10.97.25.25:8443
+  southbound_url: https://10.97.25.25:9443
   listen: 0.0.0.0:8091
   public_endpoint: http://10.97.26.11:8091
   topology:

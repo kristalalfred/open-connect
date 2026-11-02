@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-northbound="${WEAVE_NORTHBOUND_URL:-http://localhost:29080}"
+api="${WEAVE_NORTHBOUND_URL:-http://localhost:29080}"
 interval=2
 attempts=30
 
@@ -34,16 +34,16 @@ case "$role" in
   *) usage ;;
 esac
 
-url="$northbound/streams/$stream/endpoints"
+url="$api/streams/$stream/endpoints"
 
 for _ in $(seq 1 "$attempts"); do
   body="$(curl -s -o - -w '\n%{http_code}' "${auth[@]}" "$url" 2>/dev/null || true)"
   code="${body##*$'\n'}"
   json="${body%$'\n'*}"
   if [ "$code" = "401" ]; then
-    echo "northbound rejected the bearer token (401) for $url" >&2
+    echo "the API rejected the bearer token (401) for $url" >&2
     if [ -n "${WEAVE_NORTHBOUND_TOKEN:-}" ]; then
-      echo "WEAVE_NORTHBOUND_TOKEN does not match northbound's" >&2
+      echo "WEAVE_NORTHBOUND_TOKEN does not match the controllers'" >&2
     else
       echo "WEAVE_NORTHBOUND_TOKEN is unset" >&2
     fi

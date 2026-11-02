@@ -3,8 +3,6 @@ resolver = "3"
 members = [
     "crates/core",
     "crates/cli",
-    "crates/northbound",
-    "crates/southbound",
     "crates/controller",
     "crates/adapter-strom",
     "crates/strom",

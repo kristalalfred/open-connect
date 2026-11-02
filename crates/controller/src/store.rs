@@ -64,7 +64,7 @@ pub enum StoreError {
     SchemaVersion { found: i32, supported: i32 },
 }
 
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 const LOCAL_ENDPOINT_MIGRATION: [&str; 2] = [
     "UPDATE streams
@@ -245,6 +245,9 @@ impl PgStore {
             if found < 3 {
                 steps.extend(LOCAL_ENDPOINT_MIGRATION);
             }
+            if found < 4 {
+                steps.push("ALTER TABLE controller_lease ADD COLUMN IF NOT EXISTS address TEXT");
+            }
             for step in steps {
                 sqlx::query(step)
                     .execute(&mut *transaction)
@@ -351,12 +354,17 @@ impl PgStore {
                id BOOLEAN PRIMARY KEY CHECK (id),
                holder TEXT NOT NULL,
                epoch BIGINT NOT NULL,
-               expires_at TIMESTAMPTZ NOT NULL
+               expires_at TIMESTAMPTZ NOT NULL,
+               address TEXT
              )",
         )
         .execute(&mut *transaction)
         .await
         .map_err(StoreError::Query)?;
+        sqlx::query("ALTER TABLE controller_lease ADD COLUMN IF NOT EXISTS address TEXT")
+            .execute(&mut *transaction)
+            .await
+            .map_err(StoreError::Query)?;
         sqlx::query("INSERT INTO schema_version (id, version) VALUES (TRUE, $1)")
             .bind(SCHEMA_VERSION)
             .execute(&mut *transaction)
@@ -369,22 +377,25 @@ impl PgStore {
     pub async fn acquire_lease(
         &self,
         holder: &str,
+        address: Option<&str>,
         ttl: Duration,
     ) -> Result<Option<LeaseTerm>, StoreError> {
         use sqlx::Row;
 
         let Some(row) = sqlx::query(
-            "INSERT INTO controller_lease (id, holder, epoch, expires_at)
-             VALUES (TRUE, $1, 1, now() + make_interval(secs => $2))
+            "INSERT INTO controller_lease (id, holder, epoch, expires_at, address)
+             VALUES (TRUE, $1, 1, now() + make_interval(secs => $2), $3)
              ON CONFLICT (id) DO UPDATE SET
                holder = EXCLUDED.holder,
                epoch = controller_lease.epoch + 1,
-               expires_at = EXCLUDED.expires_at
+               expires_at = EXCLUDED.expires_at,
+               address = EXCLUDED.address
              WHERE controller_lease.expires_at <= now()
              RETURNING epoch",
         )
         .bind(holder)
         .bind(ttl.as_secs_f64())
+        .bind(address)
         .fetch_optional(&self.pool)
         .await
         .map_err(StoreError::Query)?
@@ -399,6 +410,16 @@ impl PgStore {
         };
         self.epoch.store(term.epoch, Ordering::SeqCst);
         Ok(Some(term))
+    }
+
+    pub async fn leader_address(&self) -> Result<Option<String>, StoreError> {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT address FROM controller_lease WHERE id AND expires_at > now()",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map(Option::flatten)
+        .map_err(StoreError::Query)
     }
 
     pub async fn renew_lease(&self, ttl: Duration) -> Result<bool, StoreError> {
@@ -2097,7 +2118,7 @@ pub(crate) mod tests {
     pub(crate) async fn leading_pg_store(url: &str) -> PgStore {
         let store = PgStore::connect(url).await.expect("connect");
         let term = store
-            .acquire_lease("test", Duration::from_secs(60))
+            .acquire_lease("test", None, Duration::from_secs(60))
             .await
             .expect("acquire")
             .expect("nobody else holds the lease");
@@ -2168,13 +2189,27 @@ pub(crate) mod tests {
         let second = PgStore::connect(&url).await.unwrap();
         let ttl = Duration::from_secs(3);
 
-        let taken = first.acquire_lease("first", ttl).await.unwrap().unwrap();
-        assert_eq!(second.acquire_lease("second", ttl).await.unwrap(), None);
+        let taken = first
+            .acquire_lease("first", None, ttl)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            second.acquire_lease("second", None, ttl).await.unwrap(),
+            None
+        );
         assert!(first.renew_lease(ttl).await.unwrap());
-        assert_eq!(second.acquire_lease("second", ttl).await.unwrap(), None);
+        assert_eq!(
+            second.acquire_lease("second", None, ttl).await.unwrap(),
+            None
+        );
 
         tokio::time::sleep(Duration::from_millis(3300)).await;
-        let takeover = second.acquire_lease("second", ttl).await.unwrap().unwrap();
+        let takeover = second
+            .acquire_lease("second", None, ttl)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(takeover.epoch, taken.epoch + 1);
         assert!(
             !first.renew_lease(ttl).await.unwrap(),
@@ -2188,15 +2223,82 @@ pub(crate) mod tests {
 
     #[tokio::test]
     #[ignore = "requires a running Postgres via DATABASE_URL"]
+    async fn pg_lease_names_the_holders_address_only_while_it_lasts() {
+        let url = fresh_database().await;
+        let first = PgStore::connect(&url).await.unwrap();
+        let second = PgStore::connect(&url).await.unwrap();
+        let ttl = Duration::from_secs(2);
+        assert_eq!(second.leader_address().await.unwrap(), None);
+
+        first
+            .acquire_lease("first", Some("http://controller-1:8082"), ttl)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            second.leader_address().await.unwrap().as_deref(),
+            Some("http://controller-1:8082")
+        );
+
+        first.release_lease().await.unwrap();
+        assert_eq!(second.leader_address().await.unwrap(), None);
+        second
+            .acquire_lease("second", None, ttl)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            first.leader_address().await.unwrap(),
+            None,
+            "a holder without an address replaces the previous one"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a running Postgres via DATABASE_URL"]
+    async fn version_three_migration_adds_the_lease_address_and_keeps_the_lease() {
+        let url = fresh_database().await;
+        let store = leading_pg_store(&url).await;
+        let kept = store.create_stream(&stream("kept")).await.unwrap();
+        run_sql(&url, "ALTER TABLE controller_lease DROP COLUMN address").await;
+        run_sql(&url, "UPDATE schema_version SET version = 3").await;
+
+        let migrated = PgStore::connect(&url).await.unwrap();
+        assert_eq!(recorded_version(&url).await, SCHEMA_VERSION);
+        assert_eq!(migrated.leader_address().await.unwrap(), None);
+        assert!(
+            migrated
+                .acquire_lease("other", Some("http://other:8082"), Duration::from_secs(60))
+                .await
+                .unwrap()
+                .is_none(),
+            "the lease taken before the migration still holds"
+        );
+        let loaded = store.load_streams().await.unwrap();
+        assert_eq!(loaded[0].spec, kept.spec);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a running Postgres via DATABASE_URL"]
     async fn pg_a_released_lease_is_taken_at_once() {
         let url = fresh_database().await;
         let first = PgStore::connect(&url).await.unwrap();
         let second = PgStore::connect(&url).await.unwrap();
         let ttl = Duration::from_secs(60);
 
-        let taken = first.acquire_lease("first", ttl).await.unwrap().unwrap();
+        let taken = first
+            .acquire_lease("first", None, ttl)
+            .await
+            .unwrap()
+            .unwrap();
         first.release_lease().await.unwrap();
-        assert!(second.acquire_lease("second", ttl).await.unwrap().is_some());
+        assert!(
+            second
+                .acquire_lease("second", None, ttl)
+                .await
+                .unwrap()
+                .is_some()
+        );
         assert!(matches!(
             first
                 .for_term(taken.epoch)
@@ -2214,7 +2316,11 @@ pub(crate) mod tests {
         let new_store = PgStore::connect(&url).await.unwrap();
         let ttl = Duration::from_secs(3);
 
-        let taken = old_store.acquire_lease("old", ttl).await.unwrap().unwrap();
+        let taken = old_store
+            .acquire_lease("old", None, ttl)
+            .await
+            .unwrap()
+            .unwrap();
         let old = old_store.for_term(taken.epoch);
         let basic = old.create_stream(&stream("basic")).await.unwrap();
         let set = old
@@ -2240,7 +2346,11 @@ pub(crate) mod tests {
         );
 
         tokio::time::sleep(Duration::from_millis(3300)).await;
-        let takeover = new_store.acquire_lease("new", ttl).await.unwrap().unwrap();
+        let takeover = new_store
+            .acquire_lease("new", None, ttl)
+            .await
+            .unwrap()
+            .unwrap();
         let new = new_store.for_term(takeover.epoch);
         let mut changed = stream("basic");
         changed.enabled = false;
@@ -2287,7 +2397,11 @@ pub(crate) mod tests {
         let old_store = PgStore::connect(&url).await.unwrap();
         let new = std::sync::Arc::new(PgStore::connect(&url).await.unwrap());
         let ttl = Duration::from_secs(3);
-        let taken = old_store.acquire_lease("old", ttl).await.unwrap().unwrap();
+        let taken = old_store
+            .acquire_lease("old", None, ttl)
+            .await
+            .unwrap()
+            .unwrap();
         let old = old_store.for_term(taken.epoch);
 
         let mut transaction = old.pool.begin().await.unwrap();
@@ -2299,7 +2413,7 @@ pub(crate) mod tests {
         tokio::time::sleep(Duration::from_millis(3300)).await;
         let takeover = tokio::spawn({
             let new = new.clone();
-            async move { new.acquire_lease("new", ttl).await }
+            async move { new.acquire_lease("new", None, ttl).await }
         });
         tokio::time::sleep(Duration::from_millis(500)).await;
         assert!(
@@ -2394,12 +2508,20 @@ pub(crate) mod tests {
         let url = fresh_database().await;
         let store = PgStore::connect(&url).await.unwrap();
         let ttl = Duration::from_secs(60);
-        let first = store.acquire_lease("one", ttl).await.unwrap().unwrap();
+        let first = store
+            .acquire_lease("one", None, ttl)
+            .await
+            .unwrap()
+            .unwrap();
         let earlier = store.for_term(first.epoch);
         let basic = earlier.create_stream(&stream("basic")).await.unwrap();
 
         store.release_lease().await.unwrap();
-        let second = store.acquire_lease("one", ttl).await.unwrap().unwrap();
+        let second = store
+            .acquire_lease("one", None, ttl)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(second.epoch, first.epoch + 1);
         assert!(matches!(
             earlier.delete_stream("basic", basic.revision).await,

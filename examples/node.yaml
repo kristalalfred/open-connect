@@ -1,6 +1,6 @@
 node:
   id: strom-node-1
-  southbound_url: http://127.0.0.1:8081
+  southbound_url: http://127.0.0.1:8082
   listen: 127.0.0.1:8091
   topology:
     attachments:

@@ -7,13 +7,15 @@ x-weave: &weave
 x-controller: &controller
   <<: *weave
   command: ["weave-controller"]
-  environment:
+  environment: &controller-environment
     WEAVE_CONTROLLER_ADDR: 0.0.0.0:8082
+    WEAVE_DASHBOARD_ADDR: 0.0.0.0:8090
     DATABASE_URL: postgres://weave:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/weave
     WEAVE_NORTHBOUND_TOKEN: ${WEAVE_NORTHBOUND_TOKEN:?set WEAVE_NORTHBOUND_TOKEN}
     WEAVE_SOUTHBOUND_KEY: ${WEAVE_SOUTHBOUND_KEY:?set WEAVE_SOUTHBOUND_KEY}
     WEAVE_SOUTHBOUND_MIN_EPOCHS: ${WEAVE_SOUTHBOUND_MIN_EPOCHS:-}
     WEAVE_SRT_KEY_SECRET: ${WEAVE_SRT_KEY_SECRET:?set WEAVE_SRT_KEY_SECRET}
+    WEAVE_CORS_ORIGIN: ${WEAVE_CORS_ORIGIN:-}
   depends_on:
     postgres:
       condition: service_healthy
@@ -43,53 +45,19 @@ services:
 
   controller-1:
     <<: *controller
+    environment:
+      <<: *controller-environment
+      WEAVE_ADVERTISE_URL: http://controller-1:8082
     ports:
-      - "127.0.0.1:8082:8082"
+      - "127.0.0.1:8090:8090"
 
   controller-2:
     <<: *controller
+    environment:
+      <<: *controller-environment
+      WEAVE_ADVERTISE_URL: http://controller-2:8082
     ports:
-      - "127.0.0.1:8083:8082"
-
-  northbound:
-    <<: *weave
-    command: ["weave-northbound"]
-    environment:
-      WEAVE_NORTHBOUND_ADDR: 0.0.0.0:9080
-      WEAVE_CONTROLLER_URL: http://controller-1:8082,http://controller-2:8082
-      WEAVE_NORTHBOUND_TOKEN: ${WEAVE_NORTHBOUND_TOKEN:?set WEAVE_NORTHBOUND_TOKEN}
-    depends_on:
-      controller-1:
-        condition: service_healthy
-      controller-2:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-
-  southbound:
-    <<: *weave
-    command: ["weave-southbound"]
-    environment:
-      WEAVE_SOUTHBOUND_ADDR: 0.0.0.0:8081
-      WEAVE_CONTROLLER_URL: http://controller-1:8082,http://controller-2:8082
-      WEAVE_SOUTHBOUND_KEY: ${WEAVE_SOUTHBOUND_KEY:?set WEAVE_SOUTHBOUND_KEY}
-      WEAVE_SOUTHBOUND_MIN_EPOCHS: ${WEAVE_SOUTHBOUND_MIN_EPOCHS:-}
-      WEAVE_SOUTHBOUND_CORS_ORIGIN: ${WEAVE_SOUTHBOUND_CORS_ORIGIN:-}
-    depends_on:
-      controller-1:
-        condition: service_healthy
-      controller-2:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8081/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
+      - "127.0.0.1:8091:8090"
 
   tls:
     image: nginx:alpine
@@ -99,11 +67,10 @@ services:
       - ./tls:/tls:ro
     ports:
       - "443:9443"
-      - "8443:8443"
     depends_on:
-      northbound:
+      controller-1:
         condition: service_healthy
-      southbound:
+      controller-2:
         condition: service_healthy
 
 volumes:

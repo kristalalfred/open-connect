@@ -1,6 +1,6 @@
 node:
   id: <node-id>
-  southbound_url: https://<control-plane-host>:8443
+  southbound_url: https://<control-plane-host>
   listen: 0.0.0.0:8091
   public_endpoint: http://<node-address>:8091
   topology:

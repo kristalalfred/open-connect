@@ -18,7 +18,7 @@ struct Cli {
         long,
         env = "WEAVE_NORTHBOUND_URL",
         hide_env_values = true,
-        default_value = "http://127.0.0.1:9080",
+        default_value = "http://127.0.0.1:8082",
         global = true
     )]
     url: String,
@@ -1228,12 +1228,12 @@ destinations:
     #[test]
     fn api_url_joins_the_base_and_route_once() {
         assert_eq!(
-            api_url("http://127.0.0.1:9080", "/streams"),
-            "http://127.0.0.1:9080/streams"
+            api_url("http://127.0.0.1:8082", "/streams"),
+            "http://127.0.0.1:8082/streams"
         );
         assert_eq!(
-            api_url("http://127.0.0.1:9080/", "/streams"),
-            "http://127.0.0.1:9080/streams",
+            api_url("http://127.0.0.1:8082/", "/streams"),
+            "http://127.0.0.1:8082/streams",
             "a trailing slash on the base does not double up"
         );
     }

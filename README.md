@@ -42,14 +42,12 @@ both relays. Restore them independently with `just timed-demo restore a` and
 
 To run on your own hosts, see [`deploy/`](deploy/README.md).
 
-To run the control plane from source, start each service in its own terminal
-with authentication off (local only; [Security](docs/security.md) covers the
-tokens):
+To run the control plane from source, start the controller with authentication
+off (local only; [Security](docs/security.md) covers the tokens), and apply the
+example from another terminal:
 
 ```sh
 export WEAVE_AUTH_DISABLED=1
-just run-north
-just run-south
 just run-controller
 just apply
 just get-stream cam1-to-studio
@@ -69,22 +67,24 @@ port range.
 ## How it works
 
 ```text
-weave CLI, apps ──▶ northbound ──▶ controller ◀── southbound ◀── adapter ──▶ Strom
+weave CLI, apps ──▶ [ northbound API │ controller │ southbound API ] ◀── adapter ──▶ Strom
 ```
 
-- **Northbound** (`weave-northbound`) takes desired state from operators and
-  applications. The `weave` CLI is one client.
 - **Controller** (`weave-controller`) owns all state, plans each stream's hops on
-  every reconcile tick, and serves the dashboard.
-- **Southbound** (`weave-southbound`) is where adapters register, heartbeat and
-  pull their node's desired hops.
+  every reconcile tick, and serves both APIs and the dashboard. With Postgres,
+  several controllers share one database: one leads and the others forward API
+  requests to it.
+- **Northbound API** takes desired state from operators and applications. The
+  `weave` CLI is one client.
+- **Southbound API** is where adapters register, heartbeat and pull their node's
+  desired hops.
 - **Adapters** translate hops into a runtime's own API.
   [`weave-adapter-strom`](crates/adapter-strom) drives Strom.
   [`weave-node`](crates/media) runs SRT media directly.
   [`nodes/browser`](nodes/browser/README.md) is a node in a web page.
 
-Northbound and southbound are stateless proxies onto the controller. The
-controller makes no outbound HTTP calls except configured webhooks.
+The controller makes no outbound HTTP calls except configured webhooks and, on a
+standby, requests forwarded to the leader.
 
 ## Documentation
 

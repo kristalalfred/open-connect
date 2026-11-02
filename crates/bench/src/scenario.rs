@@ -270,12 +270,7 @@ fn validate_steps(
                 ensure!(
                     matches!(
                         service.as_str(),
-                        "leader"
-                            | "controller"
-                            | "controller-2"
-                            | "northbound"
-                            | "southbound"
-                            | "postgres"
+                        "leader" | "controller" | "controller-2" | "tls" | "postgres"
                     ) || ["adapter-", "strom-"].iter().any(|prefix| {
                         service
                             .strip_prefix(prefix)

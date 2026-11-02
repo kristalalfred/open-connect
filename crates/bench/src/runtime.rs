@@ -16,8 +16,7 @@ use crate::report::{Report, redact};
 use crate::scenario::{RuntimeAction, ServiceAction, Step, WriteCondition};
 
 const SERVICES: &[&str] = &[
-    "northbound",
-    "southbound",
+    "tls",
     "controller",
     "controller-2",
     "postgres",
@@ -154,7 +153,7 @@ impl Bench {
                 .await?;
             ensure!(
                 response.status() != reqwest::StatusCode::UNAUTHORIZED,
-                "northbound rejected the bench token"
+                "the API rejected the bench token"
             );
             if response.status().is_success()
                 && matches!(
@@ -828,7 +827,7 @@ impl Bench {
     async fn service(&mut self, service: &str, action: ServiceAction) -> Result<()> {
         let actual = if service == "leader" {
             let mut leader = None;
-            for (name, port) in [("controller", 29082), ("controller-2", 29083)] {
+            for (name, port) in [("controller", 29092), ("controller-2", 29093)] {
                 if self
                     .http
                     .get(format!("http://localhost:{port}/status"))

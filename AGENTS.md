@@ -22,8 +22,9 @@ committed OpenAPI and JSON Schema artifacts for drift.
   designed the way it would be without any particular consumer. Do not shape
   APIs, defaults or protocols around one consumer, and do not reference
   closed-source consumers anywhere in this repository.
-- The controller owns state and plans routes. Northbound and southbound are
-  stateless proxies. Media runs in the nodes, outside the control plane.
+- The controller owns state, plans routes and serves the northbound and
+  southbound APIs. A standby forwards API requests to the leader. Media runs in
+  the nodes, outside the control plane.
 - Keep planning side-effect free. Plan against the full candidate stream set.
 - Southbound protocol changes require updating `PROTOCOL_VERSION` and every
   adapter, including `nodes/browser/`.

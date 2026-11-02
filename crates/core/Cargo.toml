@@ -12,7 +12,7 @@ categories = ["multimedia::video", "network-programming"]
 
 [features]
 default = []
-server = ["axum", "reqwest"]
+server = ["axum"]
 
 [dependencies]
 serde = { workspace = true }
@@ -25,7 +25,6 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 axum = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
 
 [lints]
 workspace = true

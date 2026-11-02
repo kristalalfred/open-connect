@@ -15,7 +15,7 @@ use srt_tokio::SrtSocket;
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 
-const NORTH: &str = "http://127.0.0.1:39080";
+const API: &str = "http://127.0.0.1:39082";
 const STREAM: &str = "timed-demo";
 
 #[derive(Parser)]
@@ -215,7 +215,7 @@ impl Resources {
 
 async fn get(client: &Client, path: &str) -> Result<Value> {
     Ok(client
-        .get(format!("{NORTH}{path}"))
+        .get(format!("{API}{path}"))
         .send()
         .await?
         .error_for_status()?
@@ -250,7 +250,7 @@ fn policy(automatic: bool) -> Value {
 
 async fn change_policy(client: &Client, automatic: bool) -> Result<()> {
     let response = client
-        .get(format!("{NORTH}/streams/{STREAM}"))
+        .get(format!("{API}/streams/{STREAM}"))
         .send()
         .await?
         .error_for_status()?;
@@ -262,7 +262,7 @@ async fn change_policy(client: &Client, automatic: bool) -> Result<()> {
     let mut resource: Value = response.json().await?;
     resource["spec"]["destinations"][0]["delivery"] = policy(automatic);
     client
-        .post(format!("{NORTH}/streams"))
+        .post(format!("{API}/streams"))
         .header(reqwest::header::IF_MATCH, etag)
         .json(&resource["spec"])
         .send()
@@ -391,30 +391,12 @@ async fn run(client: &Client) -> Result<()> {
         &[
             "--listen",
             "127.0.0.1:39082",
+            "--dashboard-listen",
+            "127.0.0.1:39083",
             "--interval-secs",
             "1",
             "--node-ttl-secs",
             &node_ttl,
-        ],
-    )?;
-    resources.child(
-        "northbound",
-        &binaries.join("weave-northbound"),
-        &[
-            "--listen",
-            "127.0.0.1:39080",
-            "--controller-url",
-            "http://127.0.0.1:39082",
-        ],
-    )?;
-    resources.child(
-        "southbound",
-        &binaries.join("weave-southbound"),
-        &[
-            "--listen",
-            "127.0.0.1:39081",
-            "--controller-url",
-            "http://127.0.0.1:39082",
         ],
     )?;
     let configurations = [
@@ -462,7 +444,7 @@ async fn run(client: &Client) -> Result<()> {
         ),
     ];
     for (id, ip, health, attachments) in configurations {
-        let configuration = json!({"node":{"id":id,"listen":format!("127.0.0.1:{health}"),"southbound_url":"http://127.0.0.1:39081","topology":{"attachments":attachments}},"clock":{"provider":"shared_host","domain":"timed-demo","tai_offset_secs":37},"media":{"listen_ip":ip}});
+        let configuration = json!({"node":{"id":id,"listen":format!("127.0.0.1:{health}"),"southbound_url":API,"topology":{"attachments":attachments}},"clock":{"provider":"shared_host","domain":"timed-demo","tai_offset_secs":37},"media":{"listen_ip":ip}});
         let path = root.join(format!("{id}.yaml"));
         std::fs::write(&path, serde_norway::to_string(&configuration)?)?;
         resources.child(
@@ -482,7 +464,7 @@ async fn run(client: &Client) -> Result<()> {
         serde_norway::to_string(&manifest)?,
     )?;
     client
-        .post(format!("{NORTH}/streams"))
+        .post(format!("{API}/streams"))
         .header(reqwest::header::IF_NONE_MATCH, "*")
         .json(&manifest)
         .send()
@@ -562,7 +544,7 @@ async fn run(client: &Client) -> Result<()> {
             "udp://127.0.0.1:39092?pkt_size=1316",
         ],
     )?;
-    println!("Timed media demo: http://127.0.0.1:39082/ui");
+    println!("Timed media demo: http://127.0.0.1:39083/ui");
     println!(
         "Commands: just timed-demo status | auto | fixed | fail [a|b|both] | restore [a|b|both] | view | stop"
     );

@@ -240,7 +240,7 @@ async fn main() -> Result<()> {
         for service in [
             "controller",
             "controller-2",
-            "southbound",
+            "tls",
             "adapter-1",
             "adapter-2",
             "adapter-3",

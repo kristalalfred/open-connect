@@ -2,7 +2,7 @@
 
 The native `weave-node` runtime implements fixed timed release and automatic
 calibration over encrypted SRT links. Strom and browser nodes do not implement
-these roles. Media stays in the nodes, outside the controller and proxies.
+these roles. Media stays in the nodes, outside the controller.
 
 ## Contract and manifest
 

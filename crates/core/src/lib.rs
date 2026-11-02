@@ -7,8 +7,6 @@ pub mod media;
 pub mod peer;
 pub mod read;
 pub mod shutdown;
-#[cfg(feature = "server")]
-pub mod upstream;
 pub mod validation;
 pub mod webhook;
 
@@ -2963,7 +2961,7 @@ mod tests {
     fn node_config() -> NodeConfig {
         NodeConfig {
             id: "strom-node-1".to_string(),
-            southbound_url: "http://127.0.0.1:8081".to_string(),
+            southbound_url: "http://127.0.0.1:8082".to_string(),
             southbound_token: None,
             listen: "0.0.0.0:8091".to_string(),
             public_endpoint: None,
@@ -3257,7 +3255,7 @@ mod tests {
     fn node_config_rejects_unknown_fields() {
         let mut value = serde_json::json!({
             "id": "n1",
-            "southbound_url": "http://127.0.0.1:8081",
+            "southbound_url": "http://127.0.0.1:8082",
             "listen": "0.0.0.0:8091",
             "topology": { "attachments": [] }
         });

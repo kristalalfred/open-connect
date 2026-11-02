@@ -29,12 +29,6 @@ browser-check:
     node nodes/browser/check.mjs --check-only
     node --test crates/controller/src/ui.test.mjs
 
-run-north:
-    cargo run -p weave-northbound
-
-run-south:
-    cargo run -p weave-southbound
-
 run-controller:
     cargo run -p weave-controller
 

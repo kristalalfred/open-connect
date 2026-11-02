@@ -1,6 +1,6 @@
 # Media bench
 
-Docker Compose runs northbound, southbound, two controllers, Postgres and four
+Docker Compose runs two controllers behind an nginx edge, Postgres and four
 Strom 0.6.10 nodes behind routers with `netem`. The stack starts without streams.
 
 Requires Docker with Compose v2, Rust, `just`, `jq`, `curl`, `bash` and Python 3.
@@ -19,7 +19,7 @@ waits for `flowing`. `stream-down` removes them. `down` removes containers,
 networks and volumes. `just bench` lists the recipes.
 
 `just bench leader` identifies the active dashboard at
-<http://localhost:29082/ui> or <http://localhost:29083/ui>.
+<http://localhost:29092/ui> or <http://localhost:29093/ui>.
 
 ## Automated media tests
 
@@ -103,7 +103,7 @@ Installed service image IDs are recorded separately.
 
 The corpus covers direct links, fan-out, concurrent feeds, controller
 failover, source reconnects, delay/loss, site partitions, relay replacement,
-encrypted endpoints, southbound outages, a media runtime restart, and strict
+encrypted endpoints, outages of the nginx edge, a media runtime restart, and strict
 declared compatibility admission, blocking, removal and recovery. The local
 [declared-media evidence](evidence/declared-media.json) records decoded media
 and control-plane results separately from unit tests. It is not independent
@@ -120,8 +120,8 @@ and uploads results, including on failure.
 media; `just bench stream-rm NAME` deletes it.
 
 The interactive producer and two consumers are singletons. Driving another
-stream takes them from the previous one. Addresses come from northbound's
-endpoint discovery. NAT endpoints run inside the corresponding node subnet.
+stream takes them from the previous one. Addresses come from the
+northbound API's endpoint discovery. NAT endpoints run inside the corresponding node subnet.
 The automated runner creates separate endpoints for each stream.
 
 ## Topology and impairment
@@ -182,12 +182,12 @@ See [Webhooks](../docs/webhooks.md) for payloads and delivery limitations.
 
 | Port | Service |
 |------|---------|
-| 29443 | northbound over TLS, which the recipes use (`SSL_CERT_FILE=bench/tls/public/ca.pem WEAVE_NORTHBOUND_URL=https://localhost:29443 weave ...`) |
-| 29444 | southbound over TLS, which the recipes use |
-| 29080 | northbound, plaintext; `scripts/endpoints.sh` uses it |
-| 29081 | southbound, plaintext (`/nodes` shows registered capabilities; `just bench page` uses it) |
-| 29082 | controller: dashboard at `/ui`, `/view`; API at `/status`, `/streams/{name}/endpoints` |
-| 29083 | controller-2, the same routes; whichever does not lead answers `503 not_leader` |
+| 29443 | the API over TLS through nginx, which the recipes use (`SSL_CERT_FILE=bench/tls/public/ca.pem WEAVE_NORTHBOUND_URL=https://localhost:29443 weave ...`) |
+| 29080 | the API in plaintext through nginx; `scripts/endpoints.sh` and `just bench page` use it |
+| 29082 | controller's API; a standby forwards to the leader |
+| 29083 | controller-2's API |
+| 29092 | controller's dashboard at `/ui`, `/view` and `/status`; a standby answers `503 not_leader` |
+| 29093 | controller-2's dashboard |
 | 28080 | strom-1 API; `/api` routes need `WEAVE_STROM_TOKEN` |
 | 28081 | strom-2 API |
 | 28082 | strom-3 API (host→container; grants no route into net_node3) |
@@ -200,13 +200,13 @@ The bench enables authentication with development credentials:
 
 | Variable | Default | Used by |
 |---|---|---|
-| `WEAVE_NORTHBOUND_TOKEN` | `bench-northbound-token` | northbound, both controllers, CLI, `endpoints.sh` |
-| `WEAVE_SOUTHBOUND_KEY` | `bench-southbound-key-for-local-use-only` | southbound, both controllers, `just bench node-token` |
+| `WEAVE_NORTHBOUND_TOKEN` | `bench-northbound-token` | both controllers, CLI, `endpoints.sh` |
+| `WEAVE_SOUTHBOUND_KEY` | `bench-southbound-key-for-local-use-only` | both controllers, `just bench node-token` |
 | `WEAVE_ADAPTER_{1,2,3,4}_TOKEN` | `strom-node-{1,2,3,4}`'s epoch-0 token under the default key | adapter-1 to adapter-4; the recipes present node 1's for southbound reads |
 | `WEAVE_BROWSER_TOKEN` | `browser-bench`'s epoch-0 token under the default key | the in-bench browser page, which takes its node id from it |
 | `WEAVE_BROWSER_2_TOKEN` | `browser-bench-2`'s epoch-0 token under the default key | the second in-bench page (`browser-2`) |
 | `WEAVE_SRT_KEY_SECRET` | `bench-srt-key-secret-for-local-use-only` | both controllers, to derive the keys of SRT links between nodes |
-| `WEAVE_SOUTHBOUND_MIN_EPOCHS` | unset | southbound, both controllers: `<id>=<epoch>` pairs that revoke a node's older tokens |
+| `WEAVE_SOUTHBOUND_MIN_EPOCHS` | unset | both controllers: `<id>=<epoch>` pairs that revoke a node's older tokens |
 | `WEAVE_STROM_TOKEN` | `bench-strom-key-for-local-use-only` | every Strom as `STROM_API_KEY`, every adapter, the recipes and `weave-bench`; `/whip` and `/whep` need no key |
 
 If you change `WEAVE_SOUTHBOUND_KEY`, also set the four adapter and two browser
@@ -228,7 +228,7 @@ ports on all interfaces. Keep this stack off public networks.
 `just timed-demo` builds and runs an isolated local control plane and four native
 SRT nodes. It needs FFmpeg on `PATH`; preview also needs FFplay. Generated H264
 video and AAC audio travel over two encrypted relayed paths and feed a decoder.
-The dashboard is <http://127.0.0.1:39082/ui>. This leaves the Compose bench alone.
+The dashboard is <http://127.0.0.1:39083/ui>. This leaves the Compose bench alone.
 
 ```sh
 just timed-demo status

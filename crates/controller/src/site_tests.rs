@@ -14,7 +14,7 @@ use weave_core::{NodeRegistration, PROTOCOL_VERSION};
 use crate::keys::LinkKeys;
 use crate::store::{MemStore, StateStore};
 use crate::webhook::{self, tests::sink};
-use crate::{AppState, reconcile_tick, router};
+use crate::{AppState, dashboard_router, reconcile_tick, router};
 
 const NORTH: &str = "north-test-token";
 const KEY: &str = "south-test-key-0123456789abcdef0123";
@@ -244,7 +244,7 @@ async fn nodes_state_view_and_webhooks_carry_one_site_network() {
     let network = listed["site"]["network"].as_str().unwrap().to_string();
     assert!(network.starts_with("site-"), "{network}");
     let (_, observed) = send(&app, "GET", "/state", None, None).await;
-    let (_, view) = send(&app, "GET", "/view", None, None).await;
+    let (_, view) = send(&dashboard_router(state.clone()), "GET", "/view", None, None).await;
     let Subject::Node(summary) = sink.next().await.event.subject else {
         panic!("a node event");
     };

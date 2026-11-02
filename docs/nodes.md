@@ -1,6 +1,6 @@
 # Nodes
 
-A node registers with southbound and declares the hop shapes its adapter can
+A node registers through the southbound API and declares the hop shapes its adapter can
 build (capabilities), where it can dial and be reached (topology), and the
 inputs and outputs it offers. The controller plans links from those
 declarations and from the hops each node reports running.

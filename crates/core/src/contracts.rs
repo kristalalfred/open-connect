@@ -246,8 +246,8 @@ pub fn northbound_openapi() -> Value {
                     "responses": {
                         "200": response("Registered nodes", Some(schema_ref("NodeList"))),
                         "401": error_response("Authentication failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -258,8 +258,8 @@ pub fn northbound_openapi() -> Value {
                     "responses": {
                         "200": response("Desired streams", Some(schema_ref("StreamList"))),
                         "401": error_response("Authentication failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 },
@@ -287,8 +287,8 @@ pub fn northbound_openapi() -> Value {
                         "412": error_response("Revision precondition failed"),
                         "428": error_response("A revision precondition is required"),
                         "500": error_response("Persistence or encoding failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -302,8 +302,8 @@ pub fn northbound_openapi() -> Value {
                         "400": error_response("Invalid stream name"),
                         "401": error_response("Authentication failed"),
                         "404": error_response("Stream not found"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 },
@@ -325,8 +325,8 @@ pub fn northbound_openapi() -> Value {
                         "412": error_response("Revision precondition failed"),
                         "428": error_response("A revision precondition is required"),
                         "500": error_response("Persistence failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -341,8 +341,8 @@ pub fn northbound_openapi() -> Value {
                         "401": error_response("Authentication failed"),
                         "404": error_response("Stream not found"),
                         "503": error_response("Stream not placed, or no controller holds the lease"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request")
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request")
                     }
                 }
             },
@@ -352,8 +352,8 @@ pub fn northbound_openapi() -> Value {
                     "responses": {
                         "200": response("Stream ownership sets", Some(schema_ref("StreamSetList"))),
                         "401": error_response("Authentication failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -367,8 +367,8 @@ pub fn northbound_openapi() -> Value {
                         "400": error_response("Invalid owner"),
                         "401": error_response("Authentication failed"),
                         "404": error_response("Stream set not found"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 },
@@ -397,8 +397,8 @@ pub fn northbound_openapi() -> Value {
                         "412": error_response("Revision precondition failed"),
                         "428": error_response("A revision precondition is required"),
                         "500": error_response("Persistence or encoding failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -412,8 +412,8 @@ pub fn northbound_openapi() -> Value {
                         "400": error_response("Invalid stream"),
                         "401": error_response("Authentication failed"),
                         "500": error_response("Encoding failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -424,8 +424,8 @@ pub fn northbound_openapi() -> Value {
                     "responses": {
                         "200": response("Control-plane status", Some(schema_ref("StatusResponse"))),
                         "401": error_response("Authentication failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -461,8 +461,8 @@ pub fn southbound_openapi() -> Value {
                     "responses": {
                         "200": response("Registered nodes", Some(schema_ref("NodeList"))),
                         "401": error_response("Authentication failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -478,8 +478,8 @@ pub fn southbound_openapi() -> Value {
                         "403": error_response("Token belongs to another node"),
                         "409": error_response("Incompatible protocol version"),
                         "500": error_response("Persistence failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -495,8 +495,8 @@ pub fn southbound_openapi() -> Value {
                         "401": error_response("Authentication failed"),
                         "403": error_response("Token belongs to another node"),
                         "404": error_response("Node not found"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -511,8 +511,8 @@ pub fn southbound_openapi() -> Value {
                         "401": error_response("Authentication failed"),
                         "403": error_response("Token belongs to another node"),
                         "404": error_response("Node not reconciled yet"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -527,8 +527,8 @@ pub fn southbound_openapi() -> Value {
                         "400": error_response("Invalid exchange"),
                         "401": error_response("Authentication failed"),
                         "403": error_response("Token belongs to another node"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -539,8 +539,8 @@ pub fn southbound_openapi() -> Value {
                     "responses": {
                         "200": response("Discovered endpoints", Some(schema_ref("EndpointList"))),
                         "401": error_response("Authentication failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }
@@ -551,8 +551,8 @@ pub fn southbound_openapi() -> Value {
                     "responses": {
                         "200": response("Observed state", Some(schema_ref("ObservedState"))),
                         "401": error_response("Authentication failed"),
-                        "502": error_response("Controller unavailable"),
-                        "504": error_response("Controller did not answer in time; it may have applied the request"),
+                        "502": error_response("The leading controller is unreachable"),
+                        "504": error_response("The leading controller did not answer in time; it may have applied the request"),
                         "503": error_response("No controller holds the lease")
                     }
                 }

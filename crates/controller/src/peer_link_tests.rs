@@ -12,7 +12,7 @@ use weave_core::{DesiredHop, PROTOCOL_VERSION};
 
 use crate::keys::{LinkKeys, TURN_CREDENTIAL_VAR, TURN_USERNAME_VAR};
 use crate::store::MemStore;
-use crate::{AppState, reconcile_tick, router};
+use crate::{AppState, dashboard_router, reconcile_tick, router};
 
 const OFFICE: &str = "203.0.113.7";
 const HOME: &str = "198.51.100.4";
@@ -489,7 +489,9 @@ async fn descriptions_reach_only_the_two_ends_and_no_shared_route() {
     let (_, plan) = send(&app, "POST", "/stream-plans", Some(music_to_filip())).await;
     assert_eq!(plan["hops"][0]["egresses"][0]["link"], LINK, "{plan}");
     assert_eq!(plan["hops"][0]["egresses"][0]["turn"], json!([]), "{plan}");
-    let view = send(&app, "GET", "/view", None).await.1;
+    let view = send(&dashboard_router(state.clone()), "GET", "/view", None)
+        .await
+        .1;
     assert!(view.to_string().contains(LINK), "{view}");
     for (route, body) in [
         ("/view", view),

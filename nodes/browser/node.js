@@ -668,7 +668,7 @@ render();
 if (fatal) {
   render();
 } else if (!config.southbound) {
-  fatal = "open this page as index.html#southbound=http://host:8081&token=…";
+  fatal = "open this page as index.html#southbound=http://host:8082&token=…";
   render();
 } else {
   heartbeat();

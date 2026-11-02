@@ -19,7 +19,7 @@ use weave_core::{
 use crate::keys::LinkKeys;
 use crate::path::{PortAllocator, derive_path};
 use crate::store::MemStore;
-use crate::{AppState, observed_state, reconcile_tick, router};
+use crate::{AppState, dashboard_router, observed_state, reconcile_tick, router};
 
 fn srt_listener(host: &str) -> NetworkListeners {
     NetworkListeners {
@@ -382,7 +382,7 @@ async fn time_the_view_with_reports(count: usize) {
     reconcile_tick(&state).await;
     let reports = report_every_hop_running(&state, &app).await;
 
-    let (view, elapsed) = timed_view(&app).await;
+    let (view, elapsed) = timed_view(&dashboard_router(state.clone())).await;
     eprintln!("{count} streams, {reports} reports: view {elapsed:?}");
 
     let streams = view["streams"].as_array().unwrap();
@@ -409,7 +409,7 @@ async fn time_the_view_of_a_fan_out(receivers: usize) {
     let app = router(state.clone(), Guard::Disabled, NodeGuard::Disabled);
     report_every_hop_running(&state, &app).await;
 
-    let (view, elapsed) = timed_view(&app).await;
+    let (view, elapsed) = timed_view(&dashboard_router(state.clone())).await;
     eprintln!("{receivers} egresses on the sender: view {elapsed:?}");
 
     let sender = &view["streams"][0]["hops"][0];

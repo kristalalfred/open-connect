@@ -30,7 +30,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -40,7 +40,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -87,7 +87,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -97,7 +97,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -231,7 +231,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -241,7 +241,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -329,7 +329,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -339,7 +339,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -449,7 +449,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -459,7 +459,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -549,7 +549,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -559,7 +559,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -596,7 +596,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -606,7 +606,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -694,7 +694,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -704,7 +704,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -849,7 +849,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -859,7 +859,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -936,7 +936,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -946,7 +946,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {
@@ -993,7 +993,7 @@
             }
           },
           "502": {
-            "description": "Controller unavailable",
+            "description": "The leading controller is unreachable",
             "content": {
               "application/json": {
                 "schema": {
@@ -1003,7 +1003,7 @@
             }
           },
           "504": {
-            "description": "Controller did not answer in time; it may have applied the request",
+            "description": "The leading controller did not answer in time; it may have applied the request",
             "content": {
               "application/json": {
                 "schema": {

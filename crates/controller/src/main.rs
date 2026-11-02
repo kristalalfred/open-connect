@@ -40,7 +40,7 @@ use anyhow::{Context, Result};
 use axum::{
     Extension, Json, Router,
     extract::{Path, State, rejection::JsonRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -50,6 +50,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use weave_core::auth::{
     self, Guard, NodeCaller, NodeGuard, refuse_other_node, require_bearer, require_node_token,
     unauthorized,
@@ -71,7 +72,10 @@ use weave_core::{
 };
 
 use keys::{LinkKeys, SecretSource};
-use leadership::{Leadership, LeaseTiming, leadership_router, not_leader, run_with_lease};
+use leadership::{
+    Apps, ControllerUrl, FORWARD_TIMEOUT, Forwarder, Leadership, LeaseTiming, api_gate,
+    dashboard_gate, not_leader, run_with_lease,
+};
 use path::{
     HopIds, HopReports, PlacementError, PortAllocator, SinglePath, derive_stream,
     destination_nodes, destination_path_status, path_reports, path_status, reports_by_hop,
@@ -84,6 +88,7 @@ use store::{
 #[derive(Debug, Parser)]
 #[command(name = "weave-controller", version, about = "open-weave reconciler")]
 struct Args {
+    #[arg(help = "Address the API listens on")]
     #[arg(
         long,
         env = "WEAVE_CONTROLLER_ADDR",
@@ -91,6 +96,27 @@ struct Args {
         default_value = "127.0.0.1:8082"
     )]
     listen: String,
+    #[arg(help = "Address the dashboard listens on. It requires no authentication")]
+    #[arg(
+        long,
+        env = "WEAVE_DASHBOARD_ADDR",
+        hide_env_values = true,
+        default_value = "127.0.0.1:8090"
+    )]
+    dashboard_listen: String,
+    #[arg(help = "URL other controllers forward API requests to while this one leads")]
+    #[arg(
+        long,
+        env = "WEAVE_ADVERTISE_URL",
+        hide_env_values = true,
+        requires = "database_url"
+    )]
+    advertise_url: Option<ControllerUrl>,
+    #[arg(
+        help = "Origin a browser-hosted node may call the API from, or `*` for any origin, for development. Unset sends no CORS headers"
+    )]
+    #[arg(long, env = "WEAVE_CORS_ORIGIN", hide_env_values = true)]
+    cors_origin: Option<String>,
     #[arg(
         long,
         env = "WEAVE_RECONCILE_INTERVAL_SECS",
@@ -503,6 +529,13 @@ async fn main() -> Result<()> {
             None
         }
     };
+    let cors = match args.cors_origin.as_deref().map(str::trim) {
+        Some(origin) if !origin.is_empty() => {
+            tracing::info!(%origin, "allowing browser nodes from this origin");
+            Some(cors_layer(origin)?)
+        }
+        _ => None,
+    };
     let controller = Controller {
         node_ttl: Duration::from_secs(args.node_ttl_secs),
         node_forget: Duration::from_secs(args.node_forget_secs),
@@ -511,29 +544,33 @@ async fn main() -> Result<()> {
         north,
         south,
         interval: Duration::from_secs(args.interval_secs),
+        advertise: args.advertise_url.clone(),
     };
     tracing::info!(interval_secs = args.interval_secs, "controller starting");
 
     match pg {
         Some(pg) => {
             let leadership = Leadership::default();
-            let api = spawn_api_server(
-                bind(&args.listen).await?,
-                leadership_router(leadership.clone()),
-            );
+            let servers = spawn_servers(
+                &args,
+                api_gate(leadership.clone(), Forwarder::new(FORWARD_TIMEOUT)?),
+                dashboard_gate(leadership.clone()),
+                cors,
+            )
+            .await?;
             let timing = LeaseTiming::new(Duration::from_secs(args.lease_ttl_secs));
             let result = run_with_lease(pg, &controller, &leadership, timing, shutdown()).await;
-            api.abort();
+            servers.iter().for_each(JoinHandle::abort);
             result
         }
         None => {
-            let (state, app) = controller.lead(Arc::new(MemStore::new())).await?;
-            let api = spawn_api_server(bind(&args.listen).await?, app);
+            let (state, apps) = controller.lead(Arc::new(MemStore::new())).await?;
+            let servers = spawn_servers(&args, apps.api, apps.dashboard, cors).await?;
             let result = tokio::select! {
                 result = shutdown() => result,
                 never = tick_every(&state, controller.interval) => match never {},
             };
-            api.abort();
+            servers.iter().for_each(JoinHandle::abort);
             result
         }
     }
@@ -547,10 +584,11 @@ struct Controller {
     north: Guard,
     south: NodeGuard,
     interval: Duration,
+    advertise: Option<ControllerUrl>,
 }
 
 impl Controller {
-    async fn lead(&self, store: Arc<dyn StateStore>) -> Result<(AppState, Router)> {
+    async fn lead(&self, store: Arc<dyn StateStore>) -> Result<(AppState, Apps)> {
         let state = AppState::hydrate(
             store,
             self.node_ttl,
@@ -559,9 +597,59 @@ impl Controller {
             self.keys.clone(),
         )
         .await?;
-        let app = router_after_first_tick(&state, self.north.clone(), self.south.clone()).await;
-        Ok((state, app))
+        let api = router_after_first_tick(&state, self.north.clone(), self.south.clone()).await;
+        let dashboard = dashboard_router(state.clone());
+        Ok((state, Apps { api, dashboard }))
     }
+}
+
+async fn spawn_servers(
+    args: &Args,
+    api: Router,
+    dashboard: Router,
+    cors: Option<CorsLayer>,
+) -> Result<[JoinHandle<Result<()>>; 2]> {
+    Ok([
+        spawn_server("API", bind(&args.listen).await?, api_listener(api, cors)),
+        spawn_server(
+            "dashboard",
+            bind(&args.dashboard_listen).await?,
+            dashboard_listener(dashboard),
+        ),
+    ])
+}
+
+fn api_listener(api: Router, cors: Option<CorsLayer>) -> Router {
+    let app = Router::new()
+        .route("/health", get(health))
+        .fallback_service(api);
+    match cors {
+        Some(cors) => app.layer(cors),
+        None => app,
+    }
+}
+
+fn dashboard_listener(dashboard: Router) -> Router {
+    Router::new()
+        .route("/", get(ui))
+        .route("/ui", get(ui))
+        .route("/health", get(health))
+        .fallback_service(dashboard)
+}
+
+fn cors_layer(origin: &str) -> Result<CorsLayer> {
+    let allow_origin = if origin == "*" {
+        AllowOrigin::any()
+    } else {
+        AllowOrigin::exact(
+            HeaderValue::from_str(origin)
+                .with_context(|| format!("WEAVE_CORS_ORIGIN is not a valid origin: {origin}"))?,
+        )
+    };
+    Ok(CorsLayer::new()
+        .allow_origin(allow_origin)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]))
 }
 
 async fn tick_every(state: &AppState, interval: Duration) -> Infallible {
@@ -989,7 +1077,8 @@ fn router(state: AppState, north: Guard, south: NodeGuard) -> Router {
         ),
     );
 
-    let streams = Router::new()
+    let operator = Router::new()
+        .route(ROUTE_STATUS, get(get_status))
         .route(ROUTE_STREAMS, get(list_streams).post(submit_stream))
         .route(ROUTE_STREAM, get(get_stream).delete(delete_stream))
         .route(ROUTE_STREAM_ENDPOINTS, get(get_endpoints))
@@ -1013,20 +1102,21 @@ fn router(state: AppState, north: Guard, south: NodeGuard) -> Router {
             require_node_token,
         ));
 
-    let api = Router::new()
-        .route(ROUTE_STATUS, get(get_status))
+    Router::new()
         .merge(shared_reads)
-        .merge(streams)
+        .merge(operator)
         .merge(nodes)
         .fallback(api_route_not_found)
-        .method_not_allowed_fallback(api_method_not_allowed);
+        .method_not_allowed_fallback(api_method_not_allowed)
+        .with_state(state)
+}
 
+fn dashboard_router(state: AppState) -> Router {
     Router::new()
-        .route("/", get(ui))
-        .route("/ui", get(ui))
-        .route("/health", get(health))
         .route("/view", get(get_view))
-        .merge(api)
+        .route(ROUTE_STATUS, get(get_status))
+        .fallback(api_route_not_found)
+        .method_not_allowed_fallback(api_method_not_allowed)
         .with_state(state)
 }
 
@@ -1058,14 +1148,18 @@ async fn require_shared_read_bearer(
     next.run(request).await
 }
 
-fn spawn_api_server(listener: tokio::net::TcpListener, app: Router) -> JoinHandle<Result<()>> {
+fn spawn_server(
+    name: &'static str,
+    listener: tokio::net::TcpListener,
+    app: Router,
+) -> JoinHandle<Result<()>> {
     tokio::spawn(async move {
         if let Ok(addr) = listener.local_addr() {
-            tracing::info!(%addr, "controller API listening");
+            tracing::info!(%addr, "controller {name} listening");
         }
         axum::serve(listener, app)
             .await
-            .context("controller server error")?;
+            .with_context(|| format!("controller {name} server error"))?;
         Ok(())
     })
 }
@@ -4039,7 +4133,7 @@ mod tests {
             ],
         }];
 
-        let app = open_router(state);
+        let app = dashboard_router(state);
         let (status, body) = send(&app, "GET", "/view", None).await;
         assert_eq!(status, StatusCode::OK);
 
@@ -4131,7 +4225,7 @@ mod tests {
             ],
         }];
 
-        let (status, body) = send(&open_router(state), "GET", "/view", None).await;
+        let (status, body) = send(&dashboard_router(state), "GET", "/view", None).await;
         assert_eq!(status, StatusCode::OK);
         let sender = &body["streams"][0]["hops"][0];
         assert_eq!(sender["id"], "weave-basic-sender");
@@ -4179,7 +4273,7 @@ mod tests {
 
         reconcile_tick(&state).await;
 
-        let (_, body) = send(&open_router(state), "GET", "/view", None).await;
+        let (_, body) = send(&dashboard_router(state), "GET", "/view", None).await;
         let url = body["streams"][0]["endpoints"]["ingress"]["url"]
             .as_str()
             .unwrap_or_else(|| panic!("no ingress url: {body}"));
@@ -4193,7 +4287,7 @@ mod tests {
     #[tokio::test]
     async fn view_before_first_tick_has_no_report() {
         let (state, _mem) = mem_state();
-        let app = open_router(state);
+        let app = dashboard_router(state);
         let (status, body) = send(&app, "GET", "/view", None).await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.get("report").is_none());
@@ -4269,7 +4363,7 @@ mod tests {
             .get_mut(&receiver.node_id)
             .unwrap()
             .hop_status = vec![report];
-        let app = open_router(state.clone());
+        let app = dashboard_router(state.clone());
 
         let (status, body) = send(&app, "GET", "/view", None).await;
         assert_eq!(status, StatusCode::OK);
@@ -4299,7 +4393,7 @@ mod tests {
     #[tokio::test]
     async fn ui_is_served_at_root_and_ui() {
         let (state, _mem) = mem_state();
-        let app = open_router(state);
+        let app = dashboard_listener(dashboard_router(state));
         for uri in ["/", "/ui"] {
             let request = Request::builder()
                 .method("GET")
@@ -4315,7 +4409,8 @@ mod tests {
         }
     }
 
-    pub(super) const NORTH_ROUTES: [(&str, &str); 9] = [
+    pub(super) const NORTH_ROUTES: [(&str, &str); 10] = [
+        ("GET", "/status"),
         ("GET", "/streams"),
         ("POST", "/streams"),
         ("POST", "/stream-plans"),
@@ -4351,8 +4446,6 @@ mod tests {
                 let (status, _) = send(&app, method, &retired, None).await;
                 assert_eq!(status, StatusCode::NOT_FOUND, "{retired} must stay retired");
             }
-            let (status, _) = send(&app, "GET", &format!("{retired_prefix}/status"), None).await;
-            assert_eq!(status, StatusCode::NOT_FOUND);
         }
     }
 
@@ -5815,10 +5908,35 @@ mod tests {
         body
     }
 
+    fn forwarder() -> Forwarder {
+        Forwarder::new(FORWARD_TIMEOUT).unwrap()
+    }
+
+    fn api_gate_for(leadership: &Leadership) -> Router {
+        api_listener(api_gate(leadership.clone(), forwarder()), None)
+    }
+
+    fn dashboard_gate_for(leadership: &Leadership) -> Router {
+        dashboard_listener(dashboard_gate(leadership.clone()))
+    }
+
+    fn apps(state: &AppState, api: Router) -> Apps {
+        Apps {
+            api,
+            dashboard: dashboard_router(state.clone()),
+        }
+    }
+
     #[tokio::test]
     async fn health_names_the_version_on_a_leader_and_a_standby() {
         let (state, _mem) = mem_state();
-        for app in [open_router(state), leadership_router(Leadership::default())] {
+        let standby = Leadership::default();
+        for app in [
+            api_listener(open_router(state.clone()), None),
+            dashboard_listener(dashboard_router(state)),
+            api_gate_for(&standby),
+            dashboard_gate_for(&standby),
+        ] {
             assert_eq!(
                 get_ok(&app, "/health").await,
                 json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") })
@@ -5827,8 +5945,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_standby_answers_not_leader_on_every_api_route() {
-        let app = leadership_router(Leadership::default());
+    async fn a_standby_that_knows_no_leader_answers_not_leader_on_every_route() {
+        let standby = Leadership::default();
+        let api = api_gate_for(&standby);
         for (method, uri) in [
             ("GET", "/status"),
             ("GET", "/streams"),
@@ -5846,16 +5965,21 @@ mod tests {
             ("POST", "/nodes/strom-node-1/signalling"),
             ("GET", "/endpoints"),
             ("GET", "/state"),
-            ("GET", "/view"),
             ("GET", "/v1/status"),
         ] {
-            let (status, body) = send(&app, method, uri, None).await;
+            let (status, body) = send(&api, method, uri, None).await;
             assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{method} {uri}");
             assert_eq!(body["code"], "not_leader", "{method} {uri}");
         }
-        assert_eq!(get_ok(&app, "/health").await["status"], "ok");
+
+        let dashboard = dashboard_gate_for(&standby);
+        for uri in ["/view", "/status"] {
+            let (status, body) = send(&dashboard, "GET", uri, None).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{uri}");
+            assert_eq!(body["code"], "not_leader", "{uri}");
+        }
         for page in ["/", "/ui"] {
-            let response = app
+            let response = dashboard
                 .clone()
                 .oneshot(Request::get(page).body(Body::empty()).unwrap())
                 .await
@@ -5869,7 +5993,8 @@ mod tests {
         let (state, _mem) = mem_state();
         two_nodes_and_basic(&state).await;
         let leadership = Leadership::default();
-        let app = leadership_router(leadership.clone());
+        let app = api_gate_for(&leadership);
+        let dashboard = dashboard_gate_for(&leadership);
 
         leadership.taking(Instant::now() + Duration::from_secs(60));
         assert_eq!(
@@ -5878,12 +6003,17 @@ mod tests {
             "nothing is served while the state loads"
         );
         let led = router_after_first_tick(&state, Guard::Disabled, NodeGuard::Disabled).await;
-        assert!(leadership.lead(led));
+        assert!(leadership.lead(apps(&state, led)));
         let hops = get_ok(&app, "/nodes/strom-node-1/desired").await;
         assert_eq!(hops.as_array().map(Vec::len), Some(1), "{hops}");
+        let view = get_ok(&dashboard, "/view").await;
+        assert_eq!(view["streams"][0]["name"], "basic", "{view}");
 
         leadership.stand_by();
         let (status, body) = desired_hops(&app, "strom-node-1").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "not_leader");
+        let (status, body) = send(&dashboard, "GET", "/view", None).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["code"], "not_leader");
     }
@@ -5892,10 +6022,10 @@ mod tests {
     async fn a_leader_serves_nothing_past_its_hold_deadline_without_a_renewal() {
         let (state, _mem) = mem_state();
         let leadership = Leadership::default();
-        let app = leadership_router(leadership.clone());
+        let app = api_gate_for(&leadership);
         leadership.taking(Instant::now() + Duration::from_millis(200));
         let led = router_after_first_tick(&state, Guard::Disabled, NodeGuard::Disabled).await;
-        assert!(leadership.lead(led));
+        assert!(leadership.lead(apps(&state, led)));
         assert_eq!(send(&app, "GET", "/status", None).await.0, StatusCode::OK);
 
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -5911,8 +6041,202 @@ mod tests {
         leadership.taking(Instant::now() + Duration::from_secs(60));
         leadership.stand_by();
 
-        assert!(!leadership.lead(open_router(state)));
-        assert!(leadership.router().is_none());
+        assert!(!leadership.lead(apps(&state, open_router(state.clone()))));
+        assert!(leadership.leading().is_none());
+    }
+
+    fn following(leader: &ControllerUrl) -> Leadership {
+        let standby = Leadership::default();
+        standby.follow(Some(leader.clone()));
+        standby
+    }
+
+    async fn unused_loopback_url() -> ControllerUrl {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
+            .parse()
+            .unwrap()
+    }
+
+    fn undated(
+        (status, mut headers, body): (StatusCode, HeaderMap, Value),
+    ) -> (StatusCode, HeaderMap, Value) {
+        headers.remove(header::DATE);
+        (status, headers, body)
+    }
+
+    #[tokio::test]
+    async fn a_standby_relays_the_leaders_answers_unchanged() {
+        let (state, _mem) = mem_state();
+        let direct = api_listener(open_router(state.clone()), None);
+        let leader = serve_on_loopback(direct.clone()).await;
+        let standby = api_gate_for(&following(&leader));
+
+        let definition = serde_json::to_value(stream("basic")).unwrap();
+        let (status, created, body) = send_with_headers(
+            &standby,
+            "POST",
+            "/streams",
+            Some(definition.clone()),
+            &[("if-none-match", "*")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        assert!(
+            state.streams.read().await.contains_key("basic"),
+            "the leader applied the write"
+        );
+        assert_eq!(
+            undated(send_with_headers(&standby, "GET", "/streams/basic", None, &[]).await),
+            send_with_headers(&direct, "GET", "/streams/basic", None, &[]).await
+        );
+        assert_eq!(
+            response_etag(
+                &send_with_headers(&standby, "GET", "/streams/basic", None, &[])
+                    .await
+                    .1
+            ),
+            response_etag(&created)
+        );
+        for (method, uri, headers) in [
+            ("GET", "/streams/missing", vec![]),
+            ("DELETE", "/streams/basic", vec![("if-match", "\"stale\"")]),
+            ("POST", "/streams", vec![("if-none-match", "*")]),
+            ("GET", "/no-such-route", vec![]),
+        ] {
+            let body = (method == "POST").then(|| definition.clone());
+            assert_eq!(
+                undated(send_with_headers(&standby, method, uri, body.clone(), &headers).await),
+                send_with_headers(&direct, method, uri, body, &headers).await,
+                "{method} {uri}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_standby_passes_credentials_and_challenges_through() {
+        let (state, _mem) = mem_state();
+        let north = weave_core::auth::Token::new("north-test-token").unwrap();
+        let leader = serve_on_loopback(api_listener(
+            router(state, Guard::Required(north), NodeGuard::Disabled),
+            None,
+        ))
+        .await;
+        let standby = api_gate_for(&following(&leader));
+
+        let (status, _, _) = send_with_headers(
+            &standby,
+            "GET",
+            "/streams",
+            None,
+            &[("authorization", "Bearer north-test-token")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, headers, body) = send_with_headers(
+            &standby,
+            "GET",
+            "/streams",
+            None,
+            &[("authorization", "Bearer wrong")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+        assert_eq!(headers[header::WWW_AUTHENTICATE], "Bearer");
+    }
+
+    #[tokio::test]
+    async fn a_request_one_controller_forwarded_is_not_forwarded_again() {
+        let first = Leadership::default();
+        let second = Leadership::default();
+        let first_url = serve_on_loopback(api_gate_for(&first)).await;
+        let second_url = serve_on_loopback(api_gate_for(&second)).await;
+        first.follow(Some(second_url));
+        second.follow(Some(first_url));
+
+        let (status, body) = send(&api_gate_for(&first), "GET", "/streams", None).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert_eq!(body["code"], "not_leader");
+    }
+
+    #[tokio::test]
+    async fn a_standby_reports_a_leader_it_cannot_reach_or_that_does_not_answer() {
+        let definition = Some(serde_json::to_value(stream("basic")).unwrap());
+        let unreachable = api_gate_for(&following(&unused_loopback_url().await));
+        let (status, body) = send(&unreachable, "POST", "/streams", definition.clone()).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+        assert_eq!(body["code"], "controller_unreachable");
+
+        let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let silent_url = format!("http://{}", silent.local_addr().unwrap())
+            .parse()
+            .unwrap();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = silent.accept().await {
+                held.push(socket);
+            }
+        });
+        let stalled = api_listener(
+            api_gate(
+                following(&silent_url),
+                Forwarder::new(Duration::from_millis(300)).unwrap(),
+            ),
+            None,
+        );
+        let (status, body) = send(&stalled, "POST", "/streams", definition).await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+        assert_eq!(body["code"], "controller_timeout");
+    }
+
+    #[tokio::test]
+    async fn a_standby_answers_preflights_and_relays_one_allowed_origin() {
+        const PAGE: &str = "http://page.example:8000";
+        let cors = || Some(cors_layer(PAGE).unwrap());
+        let (state, _mem) = mem_state();
+        let leader = serve_on_loopback(api_listener(open_router(state), cors())).await;
+        let standby = api_listener(api_gate(following(&leader), forwarder()), cors());
+        let alone = api_listener(api_gate(Leadership::default(), forwarder()), cors());
+
+        for app in [&standby, &alone] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("OPTIONS")
+                        .uri("/nodes/register")
+                        .header("origin", PAGE)
+                        .header("access-control-request-method", "POST")
+                        .header(
+                            "access-control-request-headers",
+                            "authorization,content-type",
+                        )
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()["access-control-allow-origin"], PAGE);
+        }
+
+        let response = standby
+            .clone()
+            .oneshot(
+                Request::get("/state")
+                    .header("origin", PAGE)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let origins: Vec<_> = response
+            .headers()
+            .get_all("access-control-allow-origin")
+            .iter()
+            .collect();
+        assert_eq!(origins, [PAGE]);
     }
 
     fn flowing_reports(hops: &[DesiredHop]) -> Vec<HopStatus> {
@@ -5994,7 +6318,7 @@ mod tests {
             get_ok(&app, "/status").await["streams"][0]["status"],
             "pending"
         );
-        assert!(get_ok(&app, "/view").await["streams"][0]["hops"][0]["state"].is_null());
+        assert!(get_ok(&dashboard_router(state.clone()), "/view").await["streams"][0]["hops"][0]["state"].is_null());
         report_flowing(&app, "strom-node-1").await;
         reconcile_tick(&state).await;
         assert_eq!(
@@ -6315,7 +6639,10 @@ mod tests {
         );
     }
 
-    async fn pg_controller(url: &str) -> (Arc<PgStore>, Controller) {
+    async fn pg_controller(
+        url: &str,
+        advertise: Option<ControllerUrl>,
+    ) -> (Arc<PgStore>, Controller) {
         let pg = Arc::new(PgStore::connect(url).await.expect("connect"));
         let controller = Controller {
             node_ttl: Duration::from_secs(15),
@@ -6325,8 +6652,16 @@ mod tests {
             north: Guard::Disabled,
             south: NodeGuard::Disabled,
             interval: Duration::from_millis(200),
+            advertise,
         };
         (pg, controller)
+    }
+
+    async fn serve_on_loopback(app: Router) -> ControllerUrl {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        url.parse().unwrap()
     }
 
     async fn start_controller(
@@ -6338,8 +6673,9 @@ mod tests {
         tokio::sync::oneshot::Sender<()>,
         JoinHandle<Result<()>>,
     ) {
-        let (pg, controller) = pg_controller(url).await;
         let leadership = Leadership::default();
+        let advertised = serve_on_loopback(api_gate_for(&leadership)).await;
+        let (pg, controller) = pg_controller(url, Some(advertised)).await;
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let run = tokio::spawn({
             let pg = pg.clone();
@@ -6357,7 +6693,7 @@ mod tests {
 
     async fn until_leading(leadership: &Leadership, within: Duration) {
         let deadline = Instant::now() + within;
-        while leadership.router().is_none() {
+        while leadership.leading().is_none() {
             assert!(Instant::now() < deadline, "not leading within {within:?}");
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -6365,7 +6701,7 @@ mod tests {
 
     async fn until_standing_by(leadership: &Leadership, within: Duration) {
         let deadline = Instant::now() + within;
-        while leadership.router().is_some() {
+        while leadership.leading().is_some() {
             assert!(Instant::now() < deadline, "still leading after {within:?}");
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -6403,7 +6739,7 @@ mod tests {
 
         let (first_pg, first, stop_first, first_run) = start_controller(&url, timing).await;
         until_leading(&first, Duration::from_secs(5)).await;
-        let first_app = leadership_router(first.clone());
+        let first_app = api_gate_for(&first);
         let before = served_state(&first_app).await;
         assert_eq!(
             before["node-1"].as_array().map(Vec::len),
@@ -6412,12 +6748,13 @@ mod tests {
         );
 
         let (_second_pg, second, _stop_second, _second_run) = start_controller(&url, timing).await;
-        let second_app = leadership_router(second.clone());
+        let second_app = api_gate_for(&second);
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(second.router().is_none(), "the lease has one holder");
+        assert!(second.leading().is_none(), "the lease has one holder");
         assert_eq!(
-            desired_hops(&second_app, "restart-node-1").await.0,
-            StatusCode::SERVICE_UNAVAILABLE
+            served_state(&second_app).await,
+            before,
+            "the standby forwards to the leader"
         );
         assert_eq!(
             served_state(&first_app).await,
@@ -6456,7 +6793,7 @@ mod tests {
         let timing = LeaseTiming::new(Duration::from_secs(3));
         let (_pg, leadership, _stop, _run) = start_controller(&url, timing).await;
         until_leading(&leadership, Duration::from_secs(5)).await;
-        let earlier = leadership.router().unwrap();
+        let earlier = leadership.leading().unwrap().api;
 
         let other = sqlx::PgPool::connect(&url).await.unwrap();
         sqlx::query(
@@ -6468,7 +6805,7 @@ mod tests {
         .unwrap();
         until_standing_by(&leadership, timing.renew_every * 3).await;
         until_leading(&leadership, Duration::from_secs(5)).await;
-        let current = leadership_router(leadership.clone());
+        let current = api_gate_for(&leadership);
 
         let (status, body) = send(&earlier, "DELETE", "/streams/x", None).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
@@ -6505,11 +6842,11 @@ mod tests {
         let (_pg, leadership, _stop, run) = start_controller(&url, timing).await;
         tokio::time::sleep(Duration::from_secs(3)).await;
         assert!(!run.is_finished(), "the controller is still running");
-        assert!(leadership.router().is_none());
+        assert!(leadership.leading().is_none());
 
         set_name("basic").await.unwrap();
         until_leading(&leadership, Duration::from_secs(8)).await;
-        let app = leadership_router(leadership.clone());
+        let app = api_gate_for(&leadership);
         assert_eq!(
             send(&app, "GET", "/streams/basic", None).await.0,
             StatusCode::OK
@@ -6535,7 +6872,7 @@ mod tests {
         until_standing_by(&leadership, timing.renew_every * 3).await;
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert!(
-            leadership.router().is_none(),
+            leadership.leading().is_none(),
             "it waits while the other holder's lease lasts"
         );
 
@@ -6626,7 +6963,7 @@ mod tests {
         let timing = LeaseTiming::new(Duration::from_secs(3));
         let (_pg, leadership, _stop, _run) = start_controller(&proxy.url, timing).await;
         tokio::time::sleep(timing.retry_every / 2).await;
-        assert!(leadership.router().is_none(), "the other holder leads");
+        assert!(leadership.leading().is_none(), "the other holder leads");
 
         proxy.stall_open_connections();
         until_leading(&leadership, Duration::from_secs(15)).await;
@@ -7670,11 +8007,22 @@ mod node_auth_tests {
     }
 
     #[tokio::test]
-    async fn dashboard_and_health_stay_open() {
-        let (app, _) = app().await;
+    async fn the_dashboard_stays_open_and_the_api_serves_none_of_it() {
+        let (app, state) = app().await;
+        let dashboard = dashboard_listener(dashboard_router(state));
         for uri in ["/", "/ui", "/health", "/view", "/status"] {
-            let (status, _) = send_auth(&app, "GET", uri, None).await;
+            let (status, _) = send_auth(&dashboard, "GET", uri, None).await;
             assert_eq!(status, StatusCode::OK, "{uri} must not require a token");
+        }
+
+        let api = api_listener(app, None);
+        assert_eq!(
+            send_auth(&api, "GET", "/health", None).await.0,
+            StatusCode::OK
+        );
+        for uri in ["/", "/ui", "/view"] {
+            let (status, _) = send_auth(&api, "GET", uri, None).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{uri} is a dashboard route");
         }
     }
 
@@ -7981,7 +8329,10 @@ mod key_exposure_tests {
         assert!(!events.is_empty(), "webhooks were sent");
 
         let routes = [
-            ("/view", send(&app, get("/view")).await.1),
+            (
+                "/view",
+                send(&dashboard_router(state.clone()), get("/view")).await.1,
+            ),
             (ROUTE_STATUS, send(&app, get(ROUTE_STATUS)).await.1),
             (ROUTE_STREAMS, send(&app, get(ROUTE_STREAMS)).await.1),
             ("/streams/feed", resource),
@@ -8032,7 +8383,7 @@ mod key_exposure_tests {
 
 #[cfg(test)]
 mod args_tests {
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser};
 
     use super::Args;
 
@@ -8043,6 +8394,34 @@ mod args_tests {
             .map(|arg| arg.get_id().to_string())
             .chain(command.get_subcommands().flat_map(env_values_shown))
             .collect()
+    }
+
+    #[test]
+    fn an_advertised_url_needs_a_database_and_an_http_url() {
+        let parse = |args: &[&str]| {
+            Args::try_parse_from(std::iter::once("weave-controller").chain(args.iter().copied()))
+        };
+        assert!(parse(&["--advertise-url", "http://controller-1:8082"]).is_err());
+        assert!(
+            parse(&[
+                "--database-url",
+                "postgres://db/weave",
+                "--advertise-url",
+                "controller-1:8082"
+            ])
+            .is_err()
+        );
+        let args = parse(&[
+            "--database-url",
+            "postgres://db/weave",
+            "--advertise-url",
+            "http://controller-1:8082/",
+        ])
+        .unwrap();
+        assert_eq!(
+            args.advertise_url.as_ref().map(|url| url.as_str()),
+            Some("http://controller-1:8082")
+        );
     }
 
     #[test]

@@ -76,7 +76,7 @@ mod tests {
     const VALID: &str = r"
 node:
   id: strom-node-1
-  southbound_url: http://127.0.0.1:8081
+  southbound_url: http://127.0.0.1:8082
   listen: 0.0.0.0:8091
   topology:
     attachments:
@@ -121,8 +121,8 @@ strom:
         );
 
         let yaml = VALID.replace(
-            "southbound_url: http://127.0.0.1:8081",
-            "southbound_url: http://127.0.0.1:8081\n  southbound_token: from-yaml",
+            "southbound_url: http://127.0.0.1:8082",
+            "southbound_url: http://127.0.0.1:8082\n  southbound_token: from-yaml",
         );
         let config: AdapterConfig = serde_norway::from_str(&yaml).expect("parse");
         assert_eq!(config.node.southbound_token.as_deref(), Some("from-yaml"));
