@@ -113,10 +113,11 @@ any of them.
 - A controller answers a forwarded request itself and never forwards it again.
   A forwarded request that reaches a controller that does not lead gets
   `503 not_leader`.
-- A standby answers `503 not_leader` when the lease names no URL: no controller
-  holds the lease, or the leader runs without `WEAVE_ADVERTISE_URL`. A
-  controller that is taking over answers `503 not_leader` until it has loaded
-  its state.
+- A standby answers `503 not_leader` when the lease names no other controller's
+  URL: no controller holds the lease, the leader runs without
+  `WEAVE_ADVERTISE_URL`, or the lease still names this controller after it
+  stopped leading. A controller that is taking over answers `503 not_leader`
+  until it has loaded its state.
 - A forward that cannot connect within two seconds returns
   `502 controller_unreachable`. Each forward has a ten-second timeout, which
   returns `504 controller_timeout`; the leader may have applied the request.
