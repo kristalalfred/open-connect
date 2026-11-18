@@ -12,9 +12,17 @@ use weave_core::{
 };
 
 use crate::clock::Clock;
+use crate::endpoint::Endpoint;
 use crate::merge::{BufferLimits, Merger};
 use crate::record::{MAX_PAYLOAD, Record};
-use crate::transport::{Input, SocketTask};
+use crate::transport::Input;
+
+#[derive(Clone)]
+pub struct Settings {
+    pub clock: Clock,
+    pub limits: BufferLimits,
+    pub bind_ip: IpAddr,
+}
 
 pub struct Hop {
     desired: DesiredHop,
@@ -55,17 +63,14 @@ impl Hop {
 
     pub fn start(
         desired: DesiredHop,
-        clock: Clock,
-        limits: BufferLimits,
+        settings: Settings,
         origin: Arc<Mutex<OriginState>>,
-        bind_ip: IpAddr,
     ) -> anyhow::Result<Self> {
-        validate(&desired, &clock)?;
+        validate(&desired, &settings)?;
         let report = Arc::new(Mutex::new(initial_report(&desired)));
         let (updates, receive) = watch::channel(desired.clone());
         let shared = report.clone();
-        let task =
-            tokio::spawn(async move { run(receive, shared, clock, limits, origin, bind_ip).await });
+        let task = tokio::spawn(async move { run(receive, shared, settings, origin).await });
         Ok(Self {
             desired,
             updates,
@@ -74,8 +79,8 @@ impl Hop {
         })
     }
 
-    pub fn update(&mut self, desired: DesiredHop, clock: &Clock) -> anyhow::Result<()> {
-        validate(&desired, clock)?;
+    pub fn update(&mut self, desired: DesiredHop, settings: &Settings) -> anyhow::Result<()> {
+        validate(&desired, settings)?;
         if self.desired != desired {
             self.desired = desired.clone();
             self.updates.send_replace(desired);
@@ -94,7 +99,8 @@ impl Drop for Hop {
     }
 }
 
-fn validate(desired: &DesiredHop, clock: &Clock) -> anyhow::Result<()> {
+fn validate(desired: &DesiredHop, settings: &Settings) -> anyhow::Result<()> {
+    let clock = &settings.clock;
     anyhow::ensure!(
         desired
             .sockets()
@@ -175,23 +181,18 @@ fn validate(desired: &DesiredHop, clock: &Clock) -> anyhow::Result<()> {
 }
 
 struct Actor {
-    bind_ip: IpAddr,
+    settings: Settings,
     desired: DesiredHop,
-    inputs: BTreeMap<usize, SocketTask>,
-    outputs: BTreeMap<String, SocketTask>,
+    inputs: BTreeMap<usize, Endpoint>,
+    outputs: BTreeMap<String, Endpoint>,
     merger: Option<Merger>,
     origin: Arc<Mutex<OriginState>>,
     origin_report: DeliveryReport,
 }
 
 impl Actor {
-    fn configure(
-        &mut self,
-        desired: DesiredHop,
-        incoming: &mpsc::Sender<Input>,
-        clock: &Clock,
-        limits: BufferLimits,
-    ) {
+    fn configure(&mut self, desired: DesiredHop, incoming: &mpsc::Sender<Input>) {
+        let limits = self.settings.limits;
         let old_identity = self
             .desired
             .delivery
@@ -230,24 +231,15 @@ impl Actor {
             .chain(desired.merge_ingress.iter())
             .enumerate()
         {
-            let SocketSpec::Srt(spec) = spec else {
-                unreachable!()
-            };
             if self
                 .inputs
                 .get(&path)
-                .is_none_or(|input| input.spec != *spec)
+                .is_none_or(|input| !input.matches(spec))
             {
                 self.inputs.remove(&path);
                 self.inputs.insert(
                     path,
-                    SocketTask::input(
-                        spec.clone(),
-                        path,
-                        incoming.clone(),
-                        clock.clone(),
-                        self.bind_ip,
-                    ),
+                    Endpoint::input(spec, path, incoming.clone(), &self.settings),
                 );
                 if let Some(merger) = &mut self.merger {
                     merger.reset_path(path);
@@ -261,25 +253,23 @@ impl Actor {
                 .any(|egress| &egress.branch_id == id)
         });
         for egress in &desired.egresses {
-            let SocketSpec::Srt(spec) = &egress.socket else {
-                unreachable!()
-            };
             if self
                 .outputs
                 .get(&egress.branch_id)
-                .is_none_or(|output| output.spec != *spec)
+                .is_none_or(|output| !output.matches(&egress.socket))
             {
                 self.outputs.remove(&egress.branch_id);
                 self.outputs.insert(
                     egress.branch_id.clone(),
-                    SocketTask::output(spec.clone(), self.bind_ip),
+                    Endpoint::output(&egress.socket, &self.settings),
                 );
             }
         }
         self.desired = desired;
     }
 
-    fn accept(&mut self, input: Input, clock: &Clock) {
+    fn accept(&mut self, input: Input) {
+        let clock = &self.settings.clock;
         let Some(timing) = &self.desired.delivery else {
             let now = clock.monotonic_ns();
             for output in self.outputs.values() {
@@ -312,7 +302,7 @@ impl Actor {
                         for output in self
                             .outputs
                             .values()
-                            .filter(|output| output.spec.params().payload == PayloadKind::Raw)
+                            .filter(|output| output.payload() == PayloadKind::Raw)
                         {
                             let _ = output.try_send(input.bytes.clone(), clock.monotonic_ns());
                         }
@@ -323,7 +313,7 @@ impl Actor {
                 for output in self
                     .outputs
                     .values()
-                    .filter(|output| output.spec.params().payload == PayloadKind::Raw)
+                    .filter(|output| output.payload() == PayloadKind::Raw)
                 {
                     let _ = output.try_send(input.bytes.clone(), clock.monotonic_ns());
                 }
@@ -345,7 +335,7 @@ impl Actor {
                     for output in self
                         .outputs
                         .values()
-                        .filter(|output| output.spec.params().payload == PayloadKind::WeaveTimedV1)
+                        .filter(|output| output.payload() == PayloadKind::WeaveTimedV1)
                     {
                         let _ = output.try_send(encoded.clone(), clock.monotonic_ns());
                     }
@@ -378,7 +368,8 @@ impl Actor {
         }
     }
 
-    async fn release(&mut self, clock: &Clock) {
+    async fn release(&mut self) {
+        let clock = &self.settings.clock;
         if self
             .desired
             .delivery
@@ -404,7 +395,7 @@ impl Actor {
         let output_latency_ns = self
             .outputs
             .values()
-            .map(SocketTask::latency)
+            .map(Endpoint::latency)
             .min()
             .unwrap_or_default()
             .as_nanos()
@@ -450,7 +441,7 @@ impl Actor {
             .inputs
             .values()
             .chain(self.outputs.values())
-            .map(SocketTask::take_drops)
+            .map(Endpoint::take_drops)
             .fold(0_u64, u64::saturating_add);
         if let Some(merger) = &mut self.merger {
             merger.transport_dropped(drops);
@@ -465,7 +456,7 @@ impl Actor {
             .inputs
             .values()
             .chain(self.outputs.values())
-            .map(SocketTask::state)
+            .map(Endpoint::state)
             .collect();
         let state = if states.contains(&HopState::Failed) {
             HopState::Failed
@@ -502,14 +493,13 @@ impl Actor {
 async fn run(
     mut updates: watch::Receiver<DesiredHop>,
     report: Arc<Mutex<HopStatus>>,
-    clock: Clock,
-    limits: BufferLimits,
+    settings: Settings,
     origin: Arc<Mutex<OriginState>>,
-    bind_ip: IpAddr,
 ) {
+    let clock = settings.clock.clone();
     let desired = updates.borrow_and_update().clone();
     let mut actor = Actor {
-        bind_ip,
+        settings,
         desired: desired.clone(),
         inputs: BTreeMap::new(),
         outputs: BTreeMap::new(),
@@ -518,7 +508,7 @@ async fn run(
         origin_report: DeliveryReport::default(),
     };
     let (incoming, mut receive) = mpsc::channel(256);
-    actor.configure(desired, &incoming, &clock, limits);
+    actor.configure(desired, &incoming);
     let mut publish = tokio::time::interval(Duration::from_millis(100));
     publish.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -534,11 +524,11 @@ async fn run(
             changed = updates.changed() => {
                 if changed.is_err() { return; }
                 let desired = updates.borrow_and_update().clone();
-                actor.configure(desired, &incoming, &clock, limits);
+                actor.configure(desired, &incoming);
             }
-            _ = tokio::time::sleep(Duration::from_nanos(wait_ns)) => actor.release(&clock).await,
-            _ = publish.tick() => { actor.release(&clock).await; *report.lock().unwrap() = actor.report(clock.monotonic_ns()); }
-            Some(input) = receive.recv() => { actor.accept(input, &clock); actor.release(&clock).await; tokio::task::yield_now().await; }
+            _ = tokio::time::sleep(Duration::from_nanos(wait_ns)) => actor.release().await,
+            _ = publish.tick() => { actor.release().await; *report.lock().unwrap() = actor.report(clock.monotonic_ns()); }
+            Some(input) = receive.recv() => { actor.accept(input); actor.release().await; tokio::task::yield_now().await; }
         }
     }
 }
@@ -598,6 +588,14 @@ mod tests {
             }
         };
         tokio::join!(send, receive);
+    }
+
+    fn settings(clock: &Clock) -> Settings {
+        Settings {
+            clock: clock.clone(),
+            limits: BufferLimits::default(),
+            bind_ip: "127.0.0.1".parse().unwrap(),
+        }
     }
 
     fn ports() -> [u16; 4] {
@@ -710,22 +708,8 @@ mod tests {
             },
             ports,
         );
-        let mut origin = Hop::start(
-            source.clone(),
-            clock.clone(),
-            BufferLimits::default(),
-            Arc::default(),
-            "127.0.0.1".parse().unwrap(),
-        )
-        .unwrap();
-        let receiver = Hop::start(
-            receiver,
-            clock.clone(),
-            BufferLimits::default(),
-            Arc::default(),
-            "127.0.0.1".parse().unwrap(),
-        )
-        .unwrap();
+        let mut origin = Hop::start(source.clone(), settings(&clock), Arc::default()).unwrap();
+        let receiver = Hop::start(receiver, settings(&clock), Arc::default()).unwrap();
         let (mut producer, mut consumer) = peers(ports).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
         let sending = async {
@@ -733,7 +717,7 @@ mod tests {
                 if sequence == 100 {
                     let mut changed = source.clone();
                     changed.egresses.remove(0);
-                    origin.update(changed, &clock).unwrap();
+                    origin.update(changed, &settings(&clock)).unwrap();
                 }
                 producer
                     .send((
@@ -782,22 +766,8 @@ mod tests {
             margin_ms: 20,
         };
         let (source, receiver) = pair(policy, ports);
-        let _origin = Hop::start(
-            source,
-            clock.clone(),
-            BufferLimits::default(),
-            Arc::default(),
-            "127.0.0.1".parse().unwrap(),
-        )
-        .unwrap();
-        let receiver = Hop::start(
-            receiver,
-            clock,
-            BufferLimits::default(),
-            Arc::default(),
-            "127.0.0.1".parse().unwrap(),
-        )
-        .unwrap();
+        let _origin = Hop::start(source, settings(&clock), Arc::default()).unwrap();
+        let receiver = Hop::start(receiver, settings(&clock), Arc::default()).unwrap();
         let (mut producer, mut consumer) = peers(ports).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
         let sending = async {

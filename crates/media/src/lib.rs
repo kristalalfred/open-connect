@@ -1,4 +1,5 @@
 pub mod clock;
+pub mod endpoint;
 pub mod merge;
 pub mod node;
 pub mod record;

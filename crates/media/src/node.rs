@@ -17,7 +17,7 @@ use weave_core::{
 
 use crate::clock::{Clock, ClockConfig};
 use crate::merge::BufferLimits;
-use crate::runtime::{Hop, OriginState};
+use crate::runtime::{Hop, OriginState, Settings};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -123,9 +123,7 @@ impl Control {
         registration: NodeRegistration,
         hops: &mut BTreeMap<String, Hop>,
         origins: &mut BTreeMap<String, Arc<Mutex<OriginState>>>,
-        clock: &Clock,
-        limits: BufferLimits,
-        bind_ip: IpAddr,
+        settings: &Settings,
     ) -> Result<()> {
         if !self.registered {
             self.authorize(self.client.post(format!("{}/nodes/register", self.url)))
@@ -176,12 +174,12 @@ impl Control {
                 );
             }
             if let Some(hop) = hops.get_mut(&desired.id) {
-                hop.update(desired, clock)?;
+                hop.update(desired, settings)?;
             } else {
                 let origin = origins.entry(desired.id.clone()).or_default().clone();
                 hops.insert(
                     desired.id.clone(),
-                    Hop::start(desired, clock.clone(), limits, origin, bind_ip)?,
+                    Hop::start(desired, settings.clone(), origin)?,
                 );
             }
         }
@@ -296,6 +294,11 @@ pub async fn run(config: Config) -> Result<()> {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
     });
+    let settings = Settings {
+        clock: clock.clone(),
+        limits: config.media.limits(),
+        bind_ip: config.media.listen_ip,
+    };
     let mut hops = BTreeMap::new();
     let mut origins = BTreeMap::new();
     tracing::info!(node = %node.id, epoch, clock_domain = %clock.domain(), "native SRT media node starting");
@@ -313,14 +316,7 @@ pub async fn run(config: Config) -> Result<()> {
                 hop_status: reports(&hops),
             };
             if let Err(error) = control
-                .synchronize(
-                    registration,
-                    &mut hops,
-                    &mut origins,
-                    &clock,
-                    config.media.limits(),
-                    config.media.listen_ip,
-                )
+                .synchronize(registration, &mut hops, &mut origins, &settings)
                 .await
             {
                 if error
