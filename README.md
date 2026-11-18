@@ -4,7 +4,8 @@ open-weave is a control plane for live media contribution. You declare the
 streams you want in a manifest. The controller plans the SRT, WHIP, WHEP and
 RIST links between your media nodes, and an adapter on each node builds them.
 No media passes through the control plane. The native `weave-node` runtime
-handles SRT media, including timed release and redundant path merging.
+handles SRT media and RTP inputs and outputs, including timed release and
+redundant path merging.
 
 ```yaml
 name: cam1-to-studio

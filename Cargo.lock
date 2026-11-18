@@ -3137,6 +3137,7 @@ dependencies = [
  "serde_json",
  "serde_norway",
  "sha2",
+ "socket2 0.6.4",
  "srt-tokio",
  "thiserror 2.0.18",
  "tokio",

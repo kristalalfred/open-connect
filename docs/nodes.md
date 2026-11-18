@@ -59,12 +59,13 @@ carries. Absent means unknown, and the hops carry both.
 
 | Node | Profiles |
 |---|---|
-| Native SRT | `srt-forward`, `srt-timed-origin`, `srt-timed-forward`, `srt-timed-receiver` |
+| Native | `srt-forward`, `rtp-to-srt`, `srt-to-rtp`, `srt-timed-origin`, `srt-timed-forward`, `srt-timed-receiver` |
 | Strom | `srt-forward`, `whip-to-srt`, `srt-to-whep`, `whip-to-whep`, `srt-to-rist`, `rist-to-srt` |
 | Browser | `camera-to-whip`, `whep-to-display`, each with one egress |
 
-All native SRT profiles and Strom's `srt-forward` advertise `preserve`, with
-`accepts: {}`. Only the native timed receiver advertises merge support. All other
+All native profiles and Strom's `srt-forward` advertise `preserve`, with
+`accepts: {}`. The native timed receiver and `srt-to-rtp` advertise merge
+support. All other
 Strom profiles and both browser profiles advertise `unknown`. RIST packetization
 and WebRTC gateways do not establish output compatibility. Stored profiles
 without this metadata remain unknown until registration supplies it.
@@ -113,7 +114,48 @@ removes the stream's hops from desired state. When it returns, the stream is
 placed again.
 
 The browser node declares the input `camera` and the output `player`. The
-native SRT node and the Strom adapter declare none.
+native node declares the [RTP inputs and outputs](#rtp-inputs-and-outputs) in
+its config. The Strom adapter declares none.
+
+### RTP inputs and outputs
+
+The native node carries RTP from its inputs over SRT and sends it to its
+outputs. Each RTP packet travels as one SRT message, unchanged, so RTP
+timestamps, such as PTP-derived ST 2110-30 and AES67 timestamps, arrive as the
+sender wrote them.
+
+```yaml
+rtp:
+  inputs:
+    - id: mic-bus
+      label: Mic bus
+      tracks: [audio]
+      address: 239.69.0.1
+      port: 5004
+      interface: 10.0.0.5
+  outputs:
+    - id: studio-return
+      label: Studio return
+      address: 239.69.0.2
+      port: 5004
+      interface: 10.0.0.5
+      ttl: 16
+```
+
+| Field | Meaning |
+|---|---|
+| `address`, `port` | IPv4 multicast group, or a local unicast address for an input and a destination for an output. |
+| `source` | Inputs only. Optional. Accepts packets only from this sender; on a multicast group, joins source-specific. |
+| `interface` | Optional. The local interface address for a multicast group. |
+| `ttl` | Outputs only. Optional multicast TTL, 1 to 255. |
+
+Streams that use one input share its socket. An input drops datagrams that
+are not RTP version 2. `srt-to-rtp` takes a second path and forwards the first
+copy of each packet, identified by SSRC, sequence number and timestamp among the
+last 65,536 packets, and drops the other. It does not buffer or retime packets;
+the receiving device plays them by their timestamps, so its buffer must cover
+the slower path. Redundant RTP merging is covered by unit tests over real SRT
+sockets and a local multicast run, not by the bench.
 
 ## Topology
 

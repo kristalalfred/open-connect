@@ -17,3 +17,8 @@ clock:
   tai_offset_secs: 37
 media:
   listen_ip: 127.0.0.1
+rtp:
+  inputs:
+    - { id: mic, label: Microphone, tracks: [audio], address: 239.69.0.1, port: 5004 }
+  outputs:
+    - { id: monitor, label: Monitor, address: 239.69.0.2, port: 5004 }

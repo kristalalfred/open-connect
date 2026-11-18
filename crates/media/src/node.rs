@@ -11,13 +11,15 @@ use serde_json::json;
 use weave_core::auth::Token;
 use weave_core::{
     DeliveryCapability, DeliveryRole, DesiredHop, FormatConstraint, HopEndpointClass, HopProfile,
-    HopStatus, MediaBehavior, NodeCapabilities, NodeConfig, NodeDescriptor, NodeHeartbeat,
-    NodeRegistration, NodeStatus, PROTOCOL_VERSION, RoleSet, Transport, TransportClass,
+    HopStatus, LocalEnd, MediaBehavior, NodeCapabilities, NodeConfig, NodeDescriptor,
+    NodeHeartbeat, NodeRegistration, NodeStatus, PROTOCOL_VERSION, RoleSet, Transport,
+    TransportClass,
 };
 
 use crate::clock::{Clock, ClockConfig};
 use crate::merge::BufferLimits;
-use crate::runtime::{Hop, OriginState, Settings};
+use crate::rtp::{Rtp, RtpConfig};
+use crate::runtime::{Hop, OriginState, RTP_TO_SRT, SRT_FORWARD, SRT_TO_RTP, Settings};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +28,8 @@ pub struct Config {
     pub clock: ClockConfig,
     #[serde(default)]
     pub media: MediaConfig,
+    #[serde(default)]
+    pub rtp: RtpConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -67,16 +71,33 @@ pub fn profiles(clock_domain: &str, epoch: u64, scheduling_error_bound_us: u32) 
             roles: RoleSet::both(),
         })
     };
-    let mut profiles = vec![HopProfile {
-        id: "srt-forward".into(),
-        ingress: class(),
-        egress: class(),
-        max_egresses: None,
+    let untimed = |id: &str, ingress, egress, max_egresses, merge| HopProfile {
+        id: id.into(),
+        ingress,
+        egress,
+        max_egresses,
         media_behavior: MediaBehavior::Preserve,
-        merge: false,
+        merge,
         accepts: Some(FormatConstraint::default()),
         timed_delivery: None,
-    }];
+    };
+    let mut profiles = vec![
+        untimed(SRT_FORWARD, class(), class(), None, false),
+        untimed(
+            RTP_TO_SRT,
+            HopEndpointClass::Local(LocalEnd::Input),
+            class(),
+            None,
+            false,
+        ),
+        untimed(
+            SRT_TO_RTP,
+            class(),
+            HopEndpointClass::Local(LocalEnd::Output),
+            Some(1),
+            true,
+        ),
+    ];
     for (id, role, merge) in [
         ("srt-timed-origin", DeliveryRole::Origin, false),
         ("srt-timed-forward", DeliveryRole::Forward, false),
@@ -184,8 +205,8 @@ impl Control {
             }
         }
         let heartbeat = NodeHeartbeat {
-            inputs: Vec::new(),
-            outputs: Vec::new(),
+            inputs: registration.node.inputs,
+            outputs: registration.node.outputs,
             node_id: registration.node.id,
             status: NodeStatus::Ready,
             observation: None,
@@ -224,6 +245,7 @@ impl Config {
             self.node.topology.site.is_none(),
             "topology.site needs a node that observes its own uplink, and the native node does not; declare an attachment with a network and listener host instead"
         );
+        self.rtp.validate()?;
         anyhow::ensure!(
             (1..=65_536).contains(&self.media.max_buffer_records),
             "buffer record limit must be between 1 and 65536"
@@ -246,8 +268,8 @@ pub async fn run(config: Config) -> Result<()> {
         .map_err(|error| anyhow::anyhow!("generating origin runtime epoch: {error}"))?;
     let epoch = u64::from_be_bytes(epoch_bytes).max(1);
     let node = NodeDescriptor {
-        inputs: Vec::new(),
-        outputs: Vec::new(),
+        inputs: config.rtp.declared_inputs(),
+        outputs: config.rtp.declared_outputs(),
         id: config.node.id.clone(),
         endpoint: config.node.public_endpoint(),
         status: NodeStatus::Ready,
@@ -298,6 +320,7 @@ pub async fn run(config: Config) -> Result<()> {
         clock: clock.clone(),
         limits: config.media.limits(),
         bind_ip: config.media.listen_ip,
+        rtp: Arc::new(Rtp::new(&config.rtp)),
     };
     let mut hops = BTreeMap::new();
     let mut origins = BTreeMap::new();

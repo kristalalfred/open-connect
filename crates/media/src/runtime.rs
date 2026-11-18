@@ -8,20 +8,26 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use weave_core::{
     DeliveryReason, DeliveryReport, DeliveryRole, DeliveryState, DesiredHop, EgressStatus,
-    HopState, HopStatus, PayloadKind, SocketSpec, SocketStatus,
+    HopState, HopStatus, LocalEnd, LocalSocket, PayloadKind, SocketSpec, SocketStatus,
 };
 
 use crate::clock::Clock;
 use crate::endpoint::Endpoint;
 use crate::merge::{BufferLimits, Merger};
 use crate::record::{MAX_PAYLOAD, Record};
+use crate::rtp::Rtp;
 use crate::transport::Input;
+
+pub const SRT_FORWARD: &str = "srt-forward";
+pub const RTP_TO_SRT: &str = "rtp-to-srt";
+pub const SRT_TO_RTP: &str = "srt-to-rtp";
 
 #[derive(Clone)]
 pub struct Settings {
     pub clock: Clock,
     pub limits: BufferLimits,
     pub bind_ip: IpAddr,
+    pub rtp: Arc<Rtp>,
 }
 
 pub struct Hop {
@@ -102,16 +108,17 @@ impl Drop for Hop {
 fn validate(desired: &DesiredHop, settings: &Settings) -> anyhow::Result<()> {
     let clock = &settings.clock;
     anyhow::ensure!(
-        desired
-            .sockets()
-            .all(|socket| matches!(socket, SocketSpec::Srt(_))),
-        "native node only supports SRT sockets"
-    );
-    anyhow::ensure!(
         !desired.egresses.is_empty(),
         "native hop requires an output"
     );
+    let raw = |socket: &SocketSpec| matches!(socket, SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::Raw);
     if let Some(timing) = &desired.delivery {
+        anyhow::ensure!(
+            desired
+                .sockets()
+                .all(|socket| matches!(socket, SocketSpec::Srt(_))),
+            "native timed hops only carry SRT"
+        );
         let (profile, role) = match timing.role {
             DeliveryRole::Origin => ("srt-timed-origin", weave_core::HopRole::Sender),
             DeliveryRole::Forward => ("srt-timed-forward", weave_core::HopRole::Bridge),
@@ -122,7 +129,6 @@ fn validate(desired: &DesiredHop, settings: &Settings) -> anyhow::Result<()> {
             "invalid native timed profile, role or epoch"
         );
         let framed = |socket: &SocketSpec| matches!(socket, SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::WeaveTimedV1 && socket.params().passphrase.is_some());
-        let raw = |socket: &SocketSpec| matches!(socket, SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::Raw);
         match timing.role {
             DeliveryRole::Origin => anyhow::ensure!(
                 raw(&desired.ingress) && desired.merge_ingress.is_none(),
@@ -167,15 +173,27 @@ fn validate(desired: &DesiredHop, settings: &Settings) -> anyhow::Result<()> {
             "timed receiver requires a valid delivery policy"
         );
     } else {
-        anyhow::ensure!(
-            desired.profile_id == "srt-forward",
-            "unknown native SRT profile"
-        );
-        anyhow::ensure!(
-            desired.merge_ingress.is_none(),
-            "raw SRT inputs cannot be merged"
-        );
-        anyhow::ensure!(desired.sockets().all(|socket| matches!(socket, SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::Raw)), "unframed hop cannot carry timed payloads");
+        let input = |socket: &SocketSpec| matches!(socket, SocketSpec::Local(LocalSocket { end: LocalEnd::Input, id }) if settings.rtp.has_input(id));
+        let output = |socket: &SocketSpec| matches!(socket, SocketSpec::Local(LocalSocket { end: LocalEnd::Output, id }) if settings.rtp.has_output(id));
+        let egresses_raw = desired.egresses.iter().all(|egress| raw(&egress.socket));
+        match desired.profile_id.as_str() {
+            SRT_FORWARD => anyhow::ensure!(
+                raw(&desired.ingress) && desired.merge_ingress.is_none() && egresses_raw,
+                "SRT forwarding takes one raw SRT input and raw SRT outputs"
+            ),
+            RTP_TO_SRT => anyhow::ensure!(
+                input(&desired.ingress) && desired.merge_ingress.is_none() && egresses_raw,
+                "an RTP sender takes one configured RTP input and raw SRT outputs"
+            ),
+            SRT_TO_RTP => anyhow::ensure!(
+                raw(&desired.ingress)
+                    && desired.merge_ingress.as_ref().is_none_or(raw)
+                    && desired.egresses.len() == 1
+                    && output(&desired.egresses[0].socket),
+                "an RTP receiver takes raw SRT inputs and one configured RTP output"
+            ),
+            other => anyhow::bail!("unknown native profile {other}"),
+        }
     }
     Ok(())
 }
@@ -544,6 +562,7 @@ mod tests {
 
     use super::*;
     use crate::clock::ClockConfig;
+    use crate::rtp::{RtpConfig, RtpInput, RtpOutput};
 
     static NETWORK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -591,10 +610,15 @@ mod tests {
     }
 
     fn settings(clock: &Clock) -> Settings {
+        with_rtp(clock, RtpConfig::default())
+    }
+
+    fn with_rtp(clock: &Clock, rtp: RtpConfig) -> Settings {
         Settings {
             clock: clock.clone(),
             limits: BufferLimits::default(),
             bind_ip: "127.0.0.1".parse().unwrap(),
+            rtp: Arc::new(Rtp::new(&rtp)),
         }
     }
 
@@ -818,6 +842,155 @@ mod tests {
                 .unwrap()
                 .selected_latency_ms,
             Some(selected)
+        );
+    }
+
+    #[tokio::test]
+    async fn rtp_crosses_two_srt_paths_once_and_survives_losing_the_fast_one() {
+        let _network = NETWORK.lock().await;
+        let ports = ports();
+        let [input_port, output_port, ..] = super::tests::ports();
+        let clock = Clock::new(ClockConfig::SharedHost {
+            domain: "test".into(),
+            tai_offset_secs: 37,
+        });
+        let settings = with_rtp(
+            &clock,
+            RtpConfig {
+                inputs: vec![RtpInput {
+                    id: "mic".into(),
+                    label: "Mic".into(),
+                    tracks: vec![weave_core::Track::Audio],
+                    address: std::net::Ipv4Addr::LOCALHOST,
+                    port: input_port,
+                    source: None,
+                    interface: None,
+                }],
+                outputs: vec![RtpOutput {
+                    id: "bus".into(),
+                    label: "Bus".into(),
+                    address: std::net::Ipv4Addr::LOCALHOST,
+                    port: output_port,
+                    interface: None,
+                    ttl: None,
+                }],
+            },
+        );
+        let keyed = |latency| SrtParams {
+            payload: PayloadKind::Raw,
+            latency: Some(latency),
+            passphrase: Some(Passphrase::new("rtp-native-test-key")),
+            pbkeylen: Some(32),
+        };
+        let sender = DesiredHop {
+            id: "sender".into(),
+            node_id: "venue".into(),
+            profile_id: RTP_TO_SRT.into(),
+            role: HopRole::Sender,
+            ingress: SocketSpec::input("mic"),
+            merge_ingress: None,
+            egresses: [("studio", ports[1], 10), ("studio.2", ports[2], 100)]
+                .into_iter()
+                .map(|(id, port, latency)| DesiredEgress {
+                    branch_id: id.into(),
+                    socket: SocketSpec::Srt(SrtSpec::Connect {
+                        host: "127.0.0.1".into(),
+                        port,
+                        params: keyed(latency),
+                    }),
+                })
+                .collect(),
+            tracks: Some(vec![weave_core::Track::Audio]),
+            delivery: None,
+        };
+        let receiver = DesiredHop {
+            id: "receiver".into(),
+            node_id: "studio".into(),
+            profile_id: SRT_TO_RTP.into(),
+            role: HopRole::Receiver,
+            ingress: SocketSpec::Srt(SrtSpec::Listen {
+                port: ports[1],
+                params: keyed(10),
+            }),
+            merge_ingress: Some(SocketSpec::Srt(SrtSpec::Listen {
+                port: ports[2],
+                params: keyed(100),
+            })),
+            egresses: vec![DesiredEgress {
+                branch_id: "studio".into(),
+                socket: SocketSpec::output("bus"),
+            }],
+            tracks: Some(vec![weave_core::Track::Audio]),
+            delivery: None,
+        };
+        let mut origin = Hop::start(sender.clone(), settings.clone(), Arc::default()).unwrap();
+        let receiver = Hop::start(receiver, settings.clone(), Arc::default()).unwrap();
+        let consumer = tokio::net::UdpSocket::bind(("127.0.0.1", output_port))
+            .await
+            .unwrap();
+        let producer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(800)).await;
+
+        let first_sequence = 65_400_u16;
+        let count = 400_u16;
+        let sending = async {
+            for index in 0..count {
+                if index == count / 2 {
+                    let mut fast_path_lost = sender.clone();
+                    fast_path_lost.egresses.remove(0);
+                    origin.update(fast_path_lost, &settings).unwrap();
+                }
+                let sequence = first_sequence.wrapping_add(index);
+                let mut packet = vec![0x80, 97];
+                packet.extend_from_slice(&sequence.to_be_bytes());
+                packet.extend_from_slice(&(u32::from(index) * 48).to_be_bytes());
+                packet.extend_from_slice(&0x5eed_u32.to_be_bytes());
+                packet.extend_from_slice(&[index as u8; 288]);
+                producer
+                    .send_to(&packet, ("127.0.0.1", input_port))
+                    .await
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        };
+        let receiving = async {
+            let mut received = Vec::new();
+            let mut buffer = [0_u8; 2048];
+            while received.len() < usize::from(count) {
+                let length =
+                    tokio::time::timeout(Duration::from_secs(3), consumer.recv(&mut buffer))
+                        .await
+                        .expect("every packet arrives")
+                        .unwrap();
+                assert_eq!(length, 300);
+                assert!(buffer[12..length].iter().all(|byte| *byte == buffer[12]));
+                received.push(u16::from_be_bytes([buffer[2], buffer[3]]));
+            }
+            received
+        };
+        let ((), received) = tokio::join!(sending, receiving);
+        let mut extra = [0_u8; 2048];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(400), consumer.recv(&mut extra))
+                .await
+                .is_err(),
+            "a duplicate reached the output"
+        );
+        let expected: std::collections::BTreeSet<u16> = (0..count)
+            .map(|index| first_sequence.wrapping_add(index))
+            .collect();
+        assert_eq!(
+            received
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected
+        );
+        let report = receiver.report.lock().unwrap().clone();
+        assert_eq!(report.state, HopState::Provisioned);
+        assert_eq!(
+            report.egresses[0].status.condition,
+            weave_core::LinkCondition::Flowing
         );
     }
 }
