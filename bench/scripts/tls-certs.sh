@@ -12,12 +12,12 @@ if [ -s public/ca.pem ] && [ -s server/server.key ] &&
 fi
 
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
-    -keyout ca/ca.key -out public/ca.pem -days 3650 -subj "/CN=open-weave bench CA" \
+    -keyout ca/ca.key -out public/ca.pem -days 3650 -subj "/CN=open-connect bench CA" \
     -addext "basicConstraints=critical,CA:TRUE" \
     -addext "keyUsage=critical,keyCertSign,cRLSign"
 
 openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
-    -keyout server/server.key -out server/server.csr -subj "/CN=open-weave bench tls"
+    -keyout server/server.key -out server/server.csr -subj "/CN=open-connect bench tls"
 cat > server/server.ext <<EXT
 basicConstraints=CA:FALSE
 keyUsage=critical,digitalSignature

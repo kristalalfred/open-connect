@@ -10,7 +10,7 @@ changes. Tests live beside the code in `#[cfg(test)]` modules.
 With a test Postgres database, also run:
 
 ```sh
-DATABASE_URL=postgres://... cargo test --workspace --bin weave-controller -- --ignored --test-threads=1
+DATABASE_URL=postgres://... cargo test --workspace --bin connect-controller -- --ignored --test-threads=1
 ```
 
 Run `just contracts` after changing routes or wire types. Tests check the
@@ -18,7 +18,7 @@ committed OpenAPI and JSON Schema artifacts for drift.
 
 ## Boundaries
 
-- open-weave stands on its own. Add a capability only when it is general and
+- open-connect stands on its own. Add a capability only when it is general and
   designed the way it would be without any particular consumer. Do not shape
   APIs, defaults or protocols around one consumer, and do not reference
   closed-source consumers anywhere in this repository.

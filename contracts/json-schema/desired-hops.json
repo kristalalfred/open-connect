@@ -91,7 +91,7 @@
                 "type": "string",
                 "enum": [
                   "raw",
-                  "weave_timed_v1"
+                  "connect_timed_v1"
                 ]
               },
               "latency": {
@@ -255,7 +255,7 @@
                 "type": "string",
                 "enum": [
                   "raw",
-                  "weave_timed_v1"
+                  "connect_timed_v1"
                 ]
               },
               "latency": {
@@ -421,7 +421,7 @@
                   "type": "string",
                   "enum": [
                     "raw",
-                    "weave_timed_v1"
+                    "connect_timed_v1"
                   ]
                 },
                 "latency": {

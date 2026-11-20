@@ -1,19 +1,19 @@
 # Strom adapter
 
-`weave-adapter-strom` runs beside one [Strom](https://github.com/Eyevinn/strom)
+`connect-adapter-strom` runs beside one [Strom](https://github.com/Eyevinn/strom)
 instance. It registers the node through the southbound API, pulls its desired hops,
 creates, starts and deletes Strom flows to match, and reports what Strom runs
 from polling `/api/flows`.
 
 ```sh
-weave-adapter-strom --config examples/node.yaml
+connect-adapter-strom --config examples/node.yaml
 ```
 
-The config comes from `--config` or `WEAVE_NODE_CONFIG`.
+The config comes from `--config` or `CONNECT_NODE_CONFIG`.
 See [`examples/node.yaml`](../examples/node.yaml). A key the config
 does not define, at any depth, stops the adapter with an error naming its path.
-The node token comes from `WEAVE_SOUTHBOUND_TOKEN` or `node.southbound_token`,
-and Strom's API key from `WEAVE_STROM_TOKEN` or `strom.token` (see
+The node token comes from `CONNECT_SOUTHBOUND_TOKEN` or `node.southbound_token`,
+and Strom's API key from `CONNECT_STROM_TOKEN` or `strom.token` (see
 [Security](security.md)).
 
 ## Startup and shutdown
@@ -42,7 +42,7 @@ it reports the hops it last fetched as `pending`.
 ## Drift
 
 Edits made to managed Strom flows are overwritten by desired state. The adapter deletes
-only flows whose names start with `weave-`.
+only flows whose names start with `connect-`.
 
 A flow whose SRT address, latency or key differs from its desired hop, or whose
 WHIP or WHEP endpoint id or tracks differ, is deleted and created again. The

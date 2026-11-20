@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
+use connect_core::{PathStatus, validate_resource_id};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use weave_core::{PathStatus, validate_resource_id};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -65,7 +65,7 @@ pub enum Step {
         #[serde(default)]
         nodes: Option<Vec<String>>,
         #[serde(default)]
-        format_reason: Option<weave_core::StreamConditionReason>,
+        format_reason: Option<connect_core::StreamConditionReason>,
     },
     Observe {
         receivers: Vec<String>,
@@ -195,7 +195,7 @@ fn validate_steps(
                 );
                 let spec = read_manifest(&directory.join(file))?;
                 ensure!(
-                    weave_core::validate_stream(&spec).is_empty(),
+                    connect_core::validate_stream(&spec).is_empty(),
                     "invalid manifest {}",
                     file.display()
                 );
@@ -323,7 +323,7 @@ fn validate_node(node: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn read_manifest(path: &Path) -> Result<weave_core::StreamDefinition> {
+pub fn read_manifest(path: &Path) -> Result<connect_core::StreamDefinition> {
     let value: serde_json::Value = serde_norway::from_str(&std::fs::read_to_string(path)?)?;
     Ok(serde_json::from_value(value)?)
 }

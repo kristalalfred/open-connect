@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use tokio::sync::mpsc;
-use weave_core::{
+use connect_core::{
     DeliveryReason, HopState, LocalEnd, LocalSocket, PayloadKind, SocketSpec, SocketStatus,
 };
+use tokio::sync::mpsc;
 
 use crate::rtp::{Output, Tap};
 use crate::runtime::Settings;

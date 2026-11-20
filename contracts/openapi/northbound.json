@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "open-weave northbound API",
+    "title": "open-connect northbound API",
     "version": "0.1.0-rc.1"
   },
   "paths": {
@@ -5814,7 +5814,7 @@
                               "type": "string",
                               "enum": [
                                 "raw",
-                                "weave_timed_v1"
+                                "connect_timed_v1"
                               ]
                             },
                             {
@@ -5996,7 +5996,7 @@
                               "type": "string",
                               "enum": [
                                 "raw",
-                                "weave_timed_v1"
+                                "connect_timed_v1"
                               ]
                             },
                             {
@@ -6180,7 +6180,7 @@
                                 "type": "string",
                                 "enum": [
                                   "raw",
-                                  "weave_timed_v1"
+                                  "connect_timed_v1"
                                 ]
                               },
                               {

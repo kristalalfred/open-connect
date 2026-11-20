@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
+use connect_core::DesiredHop;
 use sha2::{Digest, Sha256};
-use weave_core::DesiredHop;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DesiredSnapshot {
@@ -17,7 +17,7 @@ pub(crate) fn snapshots(
         .into_iter()
         .map(|(node_id, hops)| {
             let mut hash = Sha256::new();
-            hash.update(b"open-weave desired snapshot\0");
+            hash.update(b"open-connect desired snapshot\0");
             hash.update((node_id.len() as u64).to_be_bytes());
             hash.update(node_id.as_bytes());
             hash.update(serde_json::to_vec(&hops).expect("desired hops always serialize as JSON"));
@@ -34,7 +34,7 @@ pub(crate) fn snapshots(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use weave_core::{DesiredEgress, HopRole, SocketSpec};
+    use connect_core::{DesiredEgress, HopRole, SocketSpec};
 
     fn hop(id: &str, node_id: &str, branch_id: &str) -> DesiredHop {
         DesiredHop {

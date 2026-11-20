@@ -7,22 +7,22 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use axum::{Json, Router, routing::get};
 use clap::Parser;
-use reqwest::{Client, RequestBuilder, StatusCode};
-use serde_json::{Value, json};
-use tokio::task::JoinHandle;
-use weave_core::auth::{self, Token};
-use weave_core::logging::{ErrorChain, excerpt};
-use weave_core::{
+use connect_core::auth::{self, Token};
+use connect_core::logging::{ErrorChain, excerpt};
+use connect_core::{
     AudioCodec, AudioConstraint, DesiredHop, EgressStatus, EndpointDescriptor, EndpointKind,
     FormatConstraint, HopEndpointClass, HopProfile, HopState, HopStatus, LinkCondition, LinkStats,
     NodeCapabilities, NodeDescriptor, NodeHeartbeat, NodeRegistration, NodeStatus,
     PROTOCOL_VERSION, RoleSet, SocketRole, SocketSpec, SocketStatus, SrtSocket, Transport,
     TransportClass, VideoCodec, VideoConstraint,
 };
-use weave_strom::{
+use connect_strom::{
     ElementStats, FlowSpec, FlowStats, SessionBytes, SessionStats, StromClient, StromError,
     StromFlow, WebRtcStats, flow_spec_from_hop, parse_flow_stats, parse_webrtc_stats,
 };
+use reqwest::{Client, RequestBuilder, StatusCode};
+use serde_json::{Value, json};
+use tokio::task::JoinHandle;
 
 use config::AdapterConfig;
 use provision::{
@@ -32,13 +32,13 @@ use provision::{
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "weave-adapter-strom",
+    name = "connect-adapter-strom",
     version,
-    about = "open-weave southbound adapter for Strom"
+    about = "open-connect southbound adapter for Strom"
 )]
 struct Args {
     #[arg(help = "Path to the adapter config file (YAML)")]
-    #[arg(long, env = "WEAVE_NODE_CONFIG", hide_env_values = true)]
+    #[arg(long, env = "CONNECT_NODE_CONFIG", hide_env_values = true)]
     config: PathBuf,
 }
 
@@ -69,7 +69,7 @@ mod args_tests {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    weave_core::logging::init();
+    connect_core::logging::init();
 
     let args = Args::parse();
     let config = AdapterConfig::load(&args.config)?;
@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
     );
 
     tokio::select! {
-        result = weave_core::shutdown::signal() => {
+        result = connect_core::shutdown::signal() => {
             result.context("waiting for shutdown signal")?;
             tracing::info!("Strom adapter shutting down");
             health_server.abort();
@@ -127,8 +127,8 @@ impl Southbound {
     fn new(url: String, token: Option<Token>) -> Self {
         Self {
             http: Client::builder()
-                .connect_timeout(weave_strom::CONNECT_TIMEOUT)
-                .timeout(weave_strom::REQUEST_TIMEOUT)
+                .connect_timeout(connect_strom::CONNECT_TIMEOUT)
+                .timeout(connect_strom::REQUEST_TIMEOUT)
                 .build()
                 .expect("building the HTTP client"),
             url,
@@ -808,7 +808,7 @@ fn strom_hop_profiles() -> Vec<HopProfile> {
             ingress: transport_class(Transport::Srt, RoleSet::both()),
             egress: transport_class(Transport::Srt, RoleSet::both()),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Preserve,
+            media_behavior: connect_core::MediaBehavior::Preserve,
             merge: false,
             accepts: Some(FormatConstraint::default()),
         },
@@ -818,7 +818,7 @@ fn strom_hop_profiles() -> Vec<HopProfile> {
             ingress: transport_class(Transport::Whip, RoleSet::only(SocketRole::Listen)),
             egress: transport_class(Transport::Srt, RoleSet::both()),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: Some(whip_input_accepts()),
         },
@@ -828,7 +828,7 @@ fn strom_hop_profiles() -> Vec<HopProfile> {
             ingress: transport_class(Transport::Srt, RoleSet::both()),
             egress: transport_class(Transport::Whep, RoleSet::only(SocketRole::Listen)),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         },
@@ -838,7 +838,7 @@ fn strom_hop_profiles() -> Vec<HopProfile> {
             ingress: transport_class(Transport::Whip, RoleSet::only(SocketRole::Listen)),
             egress: transport_class(Transport::Whep, RoleSet::only(SocketRole::Listen)),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: Some(whip_input_accepts()),
         },
@@ -848,7 +848,7 @@ fn strom_hop_profiles() -> Vec<HopProfile> {
             ingress: transport_class(Transport::Srt, RoleSet::both()),
             egress: transport_class(Transport::Rist, RoleSet::only(SocketRole::Connect)),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         },
@@ -858,7 +858,7 @@ fn strom_hop_profiles() -> Vec<HopProfile> {
             ingress: transport_class(Transport::Rist, RoleSet::only(SocketRole::Listen)),
             egress: transport_class(Transport::Srt, RoleSet::both()),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         },
@@ -888,8 +888,8 @@ struct UnsupportedStrom {
 
 async fn check_strom_version(strom: &StromClient) -> Result<()> {
     let found = strom.version().await.context("reading Strom version")?;
-    let (major, minor, patch) = weave_strom::MIN_VERSION;
-    match weave_strom::is_supported(&found) {
+    let (major, minor, patch) = connect_strom::MIN_VERSION;
+    match connect_strom::is_supported(&found) {
         Some(true) => tracing::info!(strom_version = %found, "Strom version supported"),
         Some(false) => {
             return Err(UnsupportedStrom {
@@ -1059,15 +1059,15 @@ fn push_unique(values: &mut Vec<String>, value: &str) {
     values.push(value.to_string());
 }
 
-async fn health() -> Json<weave_core::Health> {
-    Json(weave_core::Health::OK)
+async fn health() -> Json<connect_core::Health> {
+    Json(connect_core::Health::OK)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use connect_core::{DesiredEgress, HopRole, SignallingTransport};
     use std::sync::Mutex;
-    use weave_core::{DesiredEgress, HopRole, SignallingTransport};
 
     #[derive(Debug, Clone, PartialEq)]
     enum Op {
@@ -1254,7 +1254,7 @@ mod tests {
             "node:\n  id: strom-node-1\n  southbound_url: http://{addr}\n  listen: 127.0.0.1:0\n  topology: {{ attachments: [] }}\nstrom:\n  url: http://127.0.0.1:1\n"
         ))
         .unwrap();
-        let strom = RecordingFlowApi::listing(&[("weave-old-sender", "id-old")]);
+        let strom = RecordingFlowApi::listing(&[("connect-old-sender", "id-old")]);
 
         let result = sync_once(
             &southbound,
@@ -1273,7 +1273,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_restarted_adapter_registers_the_hops_its_strom_runs() {
-        let desired = hop("weave-feed-receiver-b", 20088);
+        let desired = hop("connect-feed-receiver-b", 20088);
         let registered = std::sync::Arc::new(Mutex::new(None::<NodeRegistration>));
         let seen = registered.clone();
         let answer = json!([desired]);
@@ -1354,7 +1354,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_desired_response_other_than_2xx_leaves_every_flow_alone() {
-        let flows = [flow("weave-basic-sender", "id-managed")];
+        let flows = [flow("connect-basic-sender", "id-managed")];
         let not_reconciled = json!({ "code": "node_not_found", "message": "no desired state" });
         for status in [
             StatusCode::NOT_FOUND,
@@ -1376,7 +1376,7 @@ mod tests {
     #[tokio::test]
     async fn an_empty_desired_list_deletes_only_managed_flows() {
         let flows = [
-            flow("weave-basic-sender", "id-managed"),
+            flow("connect-basic-sender", "id-managed"),
             flow("studio-mixer", "id-unmanaged"),
         ];
         let southbound = southbound_answering(StatusCode::OK, json!([])).await;
@@ -1405,12 +1405,12 @@ mod tests {
 
     #[tokio::test]
     async fn hop_status_reports_each_fanout_branch_independently() {
-        let mut desired = hop("weave-fanout-sender", 7001);
+        let mut desired = hop("connect-fanout-sender", 7001);
         desired.egresses.push(DesiredEgress {
             branch_id: "preview".to_string(),
             socket: SocketSpec::srt_connect("10.0.0.3", 7003, 1000),
         });
-        let flows = vec![flow("weave-fanout-sender", "id-fanout")];
+        let flows = vec![flow("connect-fanout-sender", "id-fanout")];
         let fake = RecordingFlowApi::default().with_stats(json!({
             "stats": { "connections": {
                 "srtsrc_0": { "connected": true, "callers": [
@@ -1485,7 +1485,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_old_runtime_flow_cannot_acknowledge_new_desired_settings() {
-        let mut desired = hop("weave-basic-sender", 7001);
+        let mut desired = hop("connect-basic-sender", 7001);
         desired.ingress = SocketSpec::srt_listen(7001, 400);
         for latency in [200, 400] {
             let observed: StromFlow = serde_json::from_value(json!({
@@ -1510,7 +1510,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_start_of_an_adopted_flow_is_reported_as_failed() {
-        let desired = hop("weave-basic-sender", 7001);
+        let desired = hop("connect-basic-sender", 7001);
         let mut stopped = serde_json::to_value(flow_spec_from_hop(&desired).unwrap()).unwrap();
         stopped["id"] = json!("id-stopped");
         stopped["running"] = json!(false);
@@ -1587,12 +1587,12 @@ mod tests {
                 "srtsink_0": { "connected": false, "callers": [] }
             }}
         });
-        let mut caller = hop("weave-feed-receiver-studio", 7002);
+        let mut caller = hop("connect-feed-receiver-studio", 7002);
         caller.ingress = SocketSpec::srt_connect("10.0.0.1", 7002, 1000);
-        let listener = hop("weave-feed-sender", 7000);
+        let listener = hop("connect-feed-sender", 7000);
         let flows = vec![
-            flow("weave-feed-receiver-studio", "id-caller"),
-            flow("weave-feed-sender", "id-listener"),
+            flow("connect-feed-receiver-studio", "id-caller"),
+            flow("connect-feed-sender", "id-listener"),
         ];
         let fake = RecordingFlowApi::default().with_stats(unconnected);
         let mut tracker = StallTracker::default();
@@ -1622,9 +1622,9 @@ mod tests {
                 "srtsink_0": { "connected": false, "callers": [] }
             }}
         });
-        let mut caller = hop("weave-feed-receiver-studio", 7002);
+        let mut caller = hop("connect-feed-receiver-studio", 7002);
         caller.ingress = SocketSpec::srt_connect("10.0.0.1", 7002, 1000);
-        let flows = vec![flow("weave-feed-receiver-studio", "id-caller")];
+        let flows = vec![flow("connect-feed-receiver-studio", "id-caller")];
         let fake = RecordingFlowApi::default().with_stats(idle);
         let mut tracker = StallTracker::default();
         let desired = vec![caller];
@@ -1637,18 +1637,21 @@ mod tests {
     #[tokio::test]
     async fn reconcile_deletes_before_creating_on_same_ports() {
         let desired = vec![
-            hop("weave-srt-latency-sender", 7001),
-            hop("weave-srt-latency-receiver-studio", 7002),
+            hop("connect-srt-latency-sender", 7001),
+            hop("connect-srt-latency-receiver-studio", 7002),
         ];
         let flows = vec![
-            flow("weave-basic-sender", "id-basic-sender"),
-            flow("weave-basic-receiver-studio", "id-basic-receiver-studio"),
+            flow("connect-basic-sender", "id-basic-sender"),
+            flow("connect-basic-receiver-studio", "id-basic-receiver-studio"),
         ];
         let fake = RecordingFlowApi::listing(&[
-            ("weave-srt-latency-sender", "id-weave-srt-latency-sender"),
             (
-                "weave-srt-latency-receiver-studio",
-                "id-weave-srt-latency-receiver-studio",
+                "connect-srt-latency-sender",
+                "id-connect-srt-latency-sender",
+            ),
+            (
+                "connect-srt-latency-receiver-studio",
+                "id-connect-srt-latency-receiver-studio",
             ),
         ]);
 
@@ -1700,13 +1703,13 @@ mod tests {
     fn whip_to_srt_hop() -> DesiredHop {
         DesiredHop {
             delivery: None,
-            id: "weave-browser-cam-receiver-output".to_string(),
+            id: "connect-browser-cam-receiver-output".to_string(),
             node_id: "strom-node-1".to_string(),
             profile_id: "whip-to-srt".to_string(),
             role: HopRole::Receiver,
             ingress: signalling(
                 SignallingTransport::Whip,
-                "weave-browser-cam-receiver-output",
+                "connect-browser-cam-receiver-output",
             ),
             merge_ingress: None,
             egresses: vec![DesiredEgress {
@@ -1720,7 +1723,7 @@ mod tests {
     fn srt_to_whep_hop() -> DesiredHop {
         DesiredHop {
             delivery: None,
-            id: "weave-browser-return-sender".to_string(),
+            id: "connect-browser-return-sender".to_string(),
             node_id: "strom-node-1".to_string(),
             profile_id: "srt-to-whep".to_string(),
             role: HopRole::Sender,
@@ -1730,7 +1733,7 @@ mod tests {
                 branch_id: "display".to_string(),
                 socket: signalling(
                     SignallingTransport::Whep,
-                    "weave-browser-return-receiver-display",
+                    "connect-browser-return-receiver-display",
                 ),
             }],
             tracks: None,
@@ -1792,7 +1795,7 @@ mod tests {
         let mut hop = whip_to_srt_hop();
         hop.profile_id = "whip-to-whep".to_string();
         hop.egresses[0].socket =
-            signalling(SignallingTransport::Whep, "weave-b2b-receiver-display");
+            signalling(SignallingTransport::Whep, "connect-b2b-receiver-display");
         let mut tracker = StallTracker::default();
         let mut conditions = Vec::new();
         for recording in ["poll-0", "poll-1", "poll-2", "ended"] {
@@ -1890,7 +1893,7 @@ mod tests {
             whip_conditions.push(status.ingress.condition);
         }
 
-        let srt = hop("weave-basic-sender", 7001);
+        let srt = hop("connect-basic-sender", 7001);
         let producer = |bytes: Option<i64>| match bytes {
             Some(bytes) => json!({ "stats": { "connections": {
                 "srtsrc_0": { "connected": true, "callers": [
@@ -2008,25 +2011,25 @@ mod tests {
         assert_eq!(constrained, ["srt-forward", "whip-to-srt", "whip-to-whep"]);
         assert_eq!(
             profiles[0].media_behavior,
-            weave_core::MediaBehavior::Preserve
+            connect_core::MediaBehavior::Preserve
         );
         assert_eq!(profiles[0].accepts, Some(FormatConstraint::default()));
         assert!(
             profiles[1..]
                 .iter()
-                .all(|profile| profile.media_behavior == weave_core::MediaBehavior::Unknown)
+                .all(|profile| profile.media_behavior == connect_core::MediaBehavior::Unknown)
         );
         let accepts = profiles[1].accepts.as_ref().unwrap();
-        let format = |video| weave_core::MediaFormat {
-            container: weave_core::Container::Rtp,
-            video: Some(weave_core::VideoFormat {
+        let format = |video| connect_core::MediaFormat {
+            container: connect_core::Container::Rtp,
+            video: Some(connect_core::VideoFormat {
                 codec: video,
                 width: 1280,
                 height: 720,
-                framerate: weave_core::Framerate::new(30, 1),
-                chroma_subsampling: weave_core::ChromaSubsampling::Yuv420,
+                framerate: connect_core::Framerate::new(30, 1),
+                chroma_subsampling: connect_core::ChromaSubsampling::Yuv420,
             }),
-            audio: Some(weave_core::AudioFormat {
+            audio: Some(connect_core::AudioFormat {
                 codec: AudioCodec::Opus,
                 sample_rate: 48_000,
                 channels: 2,
@@ -2038,7 +2041,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_missed_desired_fetch_still_reports_the_hops_strom_runs() {
-        let desired = hop("weave-feed-bridge-studio-0", 7001);
+        let desired = hop("connect-feed-bridge-studio-0", 7001);
         let fetched = southbound_answering(StatusCode::OK, json!([desired])).await;
         let missed = southbound_answering(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -2135,8 +2138,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_strom_that_cannot_be_listed_reports_the_node_degraded_and_its_hops_pending() {
-        let running = hop("weave-feed-bridge-studio-0", 7001);
-        let added = hop("weave-feed-bridge-studio-1", 7003);
+        let running = hop("connect-feed-bridge-studio-0", 7001);
+        let added = hop("connect-feed-bridge-studio-1", 7003);
         let heartbeats = std::sync::Arc::new(Mutex::new(Vec::<NodeHeartbeat>::new()));
         let seen = heartbeats.clone();
         let answer = json!([running, added]);
@@ -2334,7 +2337,7 @@ mod tests {
             .error_logged_by(
                 reconcile(
                     &strom,
-                    &[hop("weave-basic-sender", 7001)],
+                    &[hop("connect-basic-sender", 7001)],
                     &[],
                     None,
                     &mut StallTracker::default(),

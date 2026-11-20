@@ -238,7 +238,7 @@ fn common_document(title: &str, paths: Value, components: Value) -> Value {
 pub fn northbound_openapi() -> Value {
     use Reader::{Client, Controller};
     common_document(
-        "open-weave northbound API",
+        "open-connect northbound API",
         json!({
             ROUTE_NODES: {
                 "get": {
@@ -453,7 +453,7 @@ pub fn northbound_openapi() -> Value {
 pub fn southbound_openapi() -> Value {
     use Reader::{Adapter, Controller};
     common_document(
-        "open-weave southbound API",
+        "open-connect southbound API",
         json!({
             ROUTE_NODES: {
                 "get": {

@@ -1,4 +1,4 @@
-use weave_core::{
+use connect_core::{
     DesiredHop, EgressStatus, HopEndpointClass, HopProfile, HopState, HopStatus, LinkCondition,
     NetworkAttachment, NetworkListeners, NodeCapabilities, NodeDescriptor, NodeStatus,
     NodeTopology, PortRange, ResolvedAddr, RoleSet, SocketSpec, SocketStatus, SrtEndpoint,
@@ -23,7 +23,7 @@ fn profile(id: &str, merge: bool) -> HopProfile {
         ingress: srt(),
         egress: srt(),
         max_egresses: None,
-        media_behavior: weave_core::MediaBehavior::Unknown,
+        media_behavior: connect_core::MediaBehavior::Unknown,
         merge,
         accepts: None,
     }
@@ -98,7 +98,7 @@ fn stream(destinations: &[(&str, &str, u8)]) -> StreamDefinition {
     StreamDefinition {
         name: "feed".to_string(),
         enabled: true,
-        format_policy: weave_core::FormatPolicy::Report,
+        format_policy: connect_core::FormatPolicy::Report,
         allow_cleartext_links: false,
         source: endpoint("source"),
         destinations: destinations
@@ -193,8 +193,8 @@ fn hop<'a>(planned: &'a PlannedStream, id: &str) -> &'a DesiredHop {
         .unwrap_or_else(|| panic!("no hop {id}"))
 }
 
-const FIRST: &str = "weave-feed-bridge-studio-0";
-const SECOND: &str = "weave-feed-bridge-studio.2-0";
+const FIRST: &str = "connect-feed-bridge-studio-0";
+const SECOND: &str = "connect-feed-bridge-studio.2-0";
 
 fn three_relays() -> Vec<NodeDescriptor> {
     vec![
@@ -267,7 +267,7 @@ fn a_new_destination_takes_a_free_relay_before_a_running_second_paths() {
     let after = plan(&grown, &nodes, &running(&steady, &nodes));
     assert!(after.single_path.is_empty(), "{:?}", after.single_path);
     assert_eq!(
-        hop(&after, "weave-feed-bridge-preview-0").node_id,
+        hop(&after, "connect-feed-bridge-preview-0").node_id,
         "relay-c"
     );
     assert_eq!(hop(&after, FIRST), hop(&steady, FIRST));
@@ -283,7 +283,7 @@ fn a_new_destination_with_no_free_relay_takes_the_second_paths_rather_than_fail(
     let after = plan(&grown, &nodes, &running(&steady, &nodes));
     assert_eq!(hop(&after, FIRST), hop(&steady, FIRST));
     assert_eq!(
-        hop(&after, "weave-feed-bridge-preview-0").node_id,
+        hop(&after, "connect-feed-bridge-preview-0").node_id,
         "relay-b"
     );
     assert_eq!(
@@ -298,7 +298,7 @@ fn a_new_destination_with_no_free_relay_takes_the_second_paths_rather_than_fail(
 
 #[test]
 fn declared_compatibility_checks_secondary_bridges_before_the_merged_receiver() {
-    use weave_core::{
+    use connect_core::{
         Container, FormatConstraint, FormatPolicy, MediaBehavior, MediaFormat,
         StreamConditionReason, StreamConditionStatus,
     };

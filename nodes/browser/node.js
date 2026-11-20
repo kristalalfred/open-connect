@@ -1,6 +1,6 @@
 "use strict";
 
-const PROTOCOL_VERSION = 12;
+const PROTOCOL_VERSION = 13;
 const HEARTBEAT_MS = 5000;
 const POLL_MS = 2000;
 const STALL_POLLS = 3;
@@ -8,7 +8,7 @@ const RETRY_MS = 5000;
 const FAILED_AFTER_ATTEMPTS = 5;
 const ICE_GATHER_MS = 2000;
 const CAPTURE_MS = 4000;
-const NODE_ID_KEY = "weave-node-id";
+const NODE_ID_KEY = "connect-node-id";
 const RESOURCE_ID_MAX_LEN = 63;
 const RESOURCE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 
@@ -198,7 +198,7 @@ function canonicalJson(value) {
 }
 
 async function hopRevision(spec) {
-  const bytes = new TextEncoder().encode("open-weave hop\0" + canonicalJson(spec));
+  const bytes = new TextEncoder().encode("open-connect hop\0" + canonicalJson(spec));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }

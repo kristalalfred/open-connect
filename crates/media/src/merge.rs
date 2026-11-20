@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
-use weave_core::{
+use connect_core::{
     DeliveryPathReport, DeliveryPolicy, DeliveryReason, DeliveryReport, DeliveryState,
 };
 

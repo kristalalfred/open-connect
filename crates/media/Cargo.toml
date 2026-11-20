@@ -1,19 +1,19 @@
 [package]
-name = "weave-media"
+name = "connect-media"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
-description = "SRT media node with timed redundant delivery for open-weave."
+description = "SRT media node with timed redundant delivery for open-connect."
 
 [[bin]]
-name = "weave-node"
+name = "connect-node"
 path = "src/main.rs"
 
 [dependencies]
-weave-core = { workspace = true }
+connect-core = { workspace = true }
 tokio = { workspace = true, features = ["sync", "fs", "time"] }
 axum = { workspace = true }
 reqwest = { workspace = true }

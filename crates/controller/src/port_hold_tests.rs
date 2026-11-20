@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use weave_core::{
+use connect_core::{
     DesiredHop, EgressStatus, HopEndpointClass, HopProfile, HopState, HopStatus, LinkCondition,
     NetworkAttachment, NetworkListeners, NodeCapabilities, NodeDescriptor, NodeStatus,
     NodeTopology, ObservedState, PortRange, ResolvedAddr, RoleSet, SocketSpec, SocketStatus,
@@ -24,7 +24,7 @@ fn srt_forward() -> HopProfile {
         ingress: srt(),
         egress: srt(),
         max_egresses: None,
-        media_behavior: weave_core::MediaBehavior::Unknown,
+        media_behavior: connect_core::MediaBehavior::Unknown,
         merge: false,
         accepts: None,
     }
@@ -110,7 +110,7 @@ fn stream(name: &str, destinations: &[&str]) -> StreamDefinition {
     StreamDefinition {
         name: name.to_string(),
         enabled: true,
-        format_policy: weave_core::FormatPolicy::Report,
+        format_policy: connect_core::FormatPolicy::Report,
         allow_cleartext_links: false,
         source: endpoint("source"),
         destinations: destinations
@@ -200,10 +200,10 @@ fn branch(planned: &Hops, destination: &str) -> Vec<DesiredHop> {
     planned["feed"]
         .iter()
         .filter(|hop| {
-            hop.id == format!("weave-feed-receiver-{destination}")
+            hop.id == format!("connect-feed-receiver-{destination}")
                 || hop
                     .id
-                    .starts_with(&format!("weave-feed-bridge-{destination}-"))
+                    .starts_with(&format!("connect-feed-bridge-{destination}-"))
         })
         .cloned()
         .collect()
@@ -217,7 +217,7 @@ fn moved_when_a_destination_joins(nodes: &[NodeDescriptor]) -> Vec<String> {
         let grown = [stream("feed", &[&newcomer, "b"])];
         let joined = run(&grown, nodes, reported(&steady, nodes, &[]));
         let running = run(&grown, nodes, reported(&joined, nodes, &[]));
-        let receiver = format!("weave-feed-receiver-{newcomer}");
+        let receiver = format!("connect-feed-receiver-{newcomer}");
         let failing = run(&grown, nodes, reported(&joined, nodes, &[&receiver]));
         if branch(&joined, "b") != branch(&steady, "b")
             || running != joined
@@ -256,7 +256,7 @@ fn running_streams_keep_their_ports_when_another_stream_joins_runs_or_fails() {
         let both = [newcomer.clone(), existing.clone()];
         let joined = run(&both, &nodes, reported(&steady, &nodes, &[]));
         let running = run(&both, &nodes, reported(&joined, &nodes, &[]));
-        let receiver = format!("weave-{}-receiver-x", newcomer.name);
+        let receiver = format!("connect-{}-receiver-x", newcomer.name);
         let failing = run(&both, &nodes, reported(&joined, &nodes, &[&receiver]));
         if joined["feed"] != steady["feed"]
             || running != joined
@@ -308,7 +308,7 @@ fn time_a_reconcile_with_reports(count: usize) -> std::time::Duration {
 }
 
 #[test]
-#[ignore = "timing; run with `cargo test -p weave-controller reconcile_with_reports -- --ignored --nocapture --test-threads=1`"]
+#[ignore = "timing; run with `cargo test -p connect-controller reconcile_with_reports -- --ignored --nocapture --test-threads=1`"]
 fn a_reconcile_with_reports_at_one_and_two_thousand_streams() {
     time_a_reconcile_with_reports(1000);
     time_a_reconcile_with_reports(2000);

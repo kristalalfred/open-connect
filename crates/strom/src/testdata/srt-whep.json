@@ -1,6 +1,6 @@
 {
   "id": "00000000-0000-0000-0000-000000000000",
-  "name": "weave-alice-return-sender",
+  "name": "connect-alice-return-sender",
   "elements": [],
   "blocks": [
     {
@@ -19,7 +19,7 @@
       "id": "whep_out_0",
       "block_definition_id": "builtin.whep_output",
       "name": "WHEP playback",
-      "properties": { "endpoint_id": "weave-alice-return-receiver-studio" },
+      "properties": { "endpoint_id": "connect-alice-return-receiver-studio" },
       "position": [800.0, 200.0]
     }
   ],

@@ -58,5 +58,5 @@
       "to": "srtsink_0:sink"
     }
   ],
-  "name": "weave-feed-receiver-studio"
+  "name": "connect-feed-receiver-studio"
 }

@@ -1,7 +1,7 @@
-name: ow-bench
+name: oc-bench
 
-x-weave: &weave
-  image: open-weave-bench:local
+x-connect: &connect
+  image: open-connect-bench:local
   build:
     context: ..
     dockerfile: bench/Dockerfile
@@ -72,27 +72,27 @@ networks:
 
 services:
   controller: &controller
-    <<: *weave
-    container_name: ow-controller
-    command: ["weave-controller"]
+    <<: *connect
+    container_name: oc-controller
+    command: ["connect-controller"]
     environment: &controller-environment
-      WEAVE_CONTROLLER_ADDR: 0.0.0.0:8082
-      WEAVE_DASHBOARD_ADDR: 0.0.0.0:8090
-      WEAVE_ADVERTISE_URL: http://10.97.25.22:8082
-      WEAVE_CORS_ORIGIN: ${WEAVE_CORS_ORIGIN:-*}
-      WEAVE_RECONCILE_INTERVAL_SECS: "5"
-      DATABASE_URL: postgres://weave:weave@10.97.25.23:5432/weave
-      WEAVE_NORTHBOUND_TOKEN: ${WEAVE_NORTHBOUND_TOKEN:-bench-northbound-token}
-      WEAVE_SOUTHBOUND_KEY: ${WEAVE_SOUTHBOUND_KEY:-bench-southbound-key-for-local-use-only}
-      WEAVE_SOUTHBOUND_MIN_EPOCHS: ${WEAVE_SOUTHBOUND_MIN_EPOCHS:-}
-      WEAVE_SRT_KEY_SECRET: ${WEAVE_SRT_KEY_SECRET:-bench-srt-key-secret-for-local-use-only}
-      WEAVE_STUN_SERVERS: ${WEAVE_STUN_SERVERS:-}
-      WEAVE_TURN_SERVERS: ${WEAVE_TURN_SERVERS:-}
-      WEAVE_TURN_USERNAME: ${WEAVE_TURN_USERNAME:-}
-      WEAVE_TURN_CREDENTIAL: ${WEAVE_TURN_CREDENTIAL:-}
-      WEAVE_TURN_SECRET: ${WEAVE_TURN_SECRET:-}
-      WEAVE_WEBHOOK_URL: ${WEAVE_WEBHOOK_URL-http://host.docker.internal:29099}
-      WEAVE_WEBHOOK_TOKEN: ${WEAVE_WEBHOOK_TOKEN:-bench-webhook-token}
+      CONNECT_CONTROLLER_ADDR: 0.0.0.0:8082
+      CONNECT_DASHBOARD_ADDR: 0.0.0.0:8090
+      CONNECT_ADVERTISE_URL: http://10.97.25.22:8082
+      CONNECT_CORS_ORIGIN: ${CONNECT_CORS_ORIGIN:-*}
+      CONNECT_RECONCILE_INTERVAL_SECS: "5"
+      DATABASE_URL: postgres://connect:connect@10.97.25.23:5432/connect
+      CONNECT_NORTHBOUND_TOKEN: ${CONNECT_NORTHBOUND_TOKEN:-bench-northbound-token}
+      CONNECT_SOUTHBOUND_KEY: ${CONNECT_SOUTHBOUND_KEY:-bench-southbound-key-for-local-use-only}
+      CONNECT_SOUTHBOUND_MIN_EPOCHS: ${CONNECT_SOUTHBOUND_MIN_EPOCHS:-}
+      CONNECT_SRT_KEY_SECRET: ${CONNECT_SRT_KEY_SECRET:-bench-srt-key-secret-for-local-use-only}
+      CONNECT_STUN_SERVERS: ${CONNECT_STUN_SERVERS:-}
+      CONNECT_TURN_SERVERS: ${CONNECT_TURN_SERVERS:-}
+      CONNECT_TURN_USERNAME: ${CONNECT_TURN_USERNAME:-}
+      CONNECT_TURN_CREDENTIAL: ${CONNECT_TURN_CREDENTIAL:-}
+      CONNECT_TURN_SECRET: ${CONNECT_TURN_SECRET:-}
+      CONNECT_WEBHOOK_URL: ${CONNECT_WEBHOOK_URL-http://host.docker.internal:29099}
+      CONNECT_WEBHOOK_TOKEN: ${CONNECT_WEBHOOK_TOKEN:-bench-webhook-token}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -113,10 +113,10 @@ services:
 
   controller-2:
     <<: *controller
-    container_name: ow-controller-2
+    container_name: oc-controller-2
     environment:
       <<: *controller-environment
-      WEAVE_ADVERTISE_URL: http://10.97.25.24:8082
+      CONNECT_ADVERTISE_URL: http://10.97.25.24:8082
     ports:
       - "29083:8082"
       - "29093:8090"
@@ -126,19 +126,19 @@ services:
 
   postgres:
     image: postgres:16
-    container_name: ow-postgres
+    container_name: oc-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: weave
-      POSTGRES_PASSWORD: weave
-      POSTGRES_DB: weave
+      POSTGRES_USER: connect
+      POSTGRES_PASSWORD: connect
+      POSTGRES_DB: connect
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
       net_core:
         ipv4_address: 10.97.25.23
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U weave -d weave"]
+      test: ["CMD-SHELL", "pg_isready -U connect -d connect"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -146,7 +146,7 @@ services:
 
   tls-certs:
     image: nicolaka/netshoot:latest
-    container_name: ow-tls-certs
+    container_name: oc-tls-certs
     restart: "no"
     network_mode: none
     volumes:
@@ -156,7 +156,7 @@ services:
 
   tls:
     image: nginx:alpine
-    container_name: ow-tls
+    container_name: oc-tls
     restart: unless-stopped
     volumes:
       - ./config/tls-proxy.conf:/etc/nginx/nginx.conf:ro
@@ -177,7 +177,7 @@ services:
 
   route-manager:
     image: nicolaka/netshoot:latest
-    container_name: ow-route-manager
+    container_name: oc-route-manager
     restart: unless-stopped
     network_mode: none
     pid: host
@@ -198,7 +198,7 @@ services:
 
   router-1:
     image: nicolaka/netshoot:latest
-    container_name: ow-router-1
+    container_name: oc-router-1
     cap_add: [NET_ADMIN]
     sysctls:
       - net.ipv4.ip_forward=1
@@ -214,7 +214,7 @@ services:
 
   router-2:
     image: nicolaka/netshoot:latest
-    container_name: ow-router-2
+    container_name: oc-router-2
     cap_add: [NET_ADMIN]
     sysctls:
       - net.ipv4.ip_forward=1
@@ -230,7 +230,7 @@ services:
 
   router-3:
     image: nicolaka/netshoot:latest
-    container_name: ow-router-3
+    container_name: oc-router-3
     cap_add: [NET_ADMIN]
     sysctls:
       - net.ipv4.ip_forward=1
@@ -246,7 +246,7 @@ services:
 
   router-4:
     image: nicolaka/netshoot:latest
-    container_name: ow-router-4
+    container_name: oc-router-4
     cap_add: [NET_ADMIN]
     sysctls:
       - net.ipv4.ip_forward=1
@@ -262,11 +262,11 @@ services:
 
   strom-1:
     image: eyevinntechnology/strom:0.6.10
-    container_name: ow-strom-1
+    container_name: oc-strom-1
     environment:
       STROM_PORT: "8080"
       STROM_DATA_DIR: /data
-      STROM_API_KEY: ${WEAVE_STROM_TOKEN:-bench-strom-key-for-local-use-only}
+      STROM_API_KEY: ${CONNECT_STROM_TOKEN:-bench-strom-key-for-local-use-only}
     volumes:
       - strom1-data:/data
     ports:
@@ -282,15 +282,15 @@ services:
       start_period: 20s
 
   adapter-1:
-    <<: *weave
-    container_name: ow-adapter-1
-    command: ["weave-adapter-strom", "--config", "/etc/weave/node.yaml"]
+    <<: *connect
+    container_name: oc-adapter-1
+    command: ["connect-adapter-strom", "--config", "/etc/connect/node.yaml"]
     environment:
-      WEAVE_SOUTHBOUND_TOKEN: ${WEAVE_ADAPTER_1_TOKEN:-strom-node-1.0.dc18eb10e0f080536c55f9ff6569abb31d2da3ce4f782b294dd0d32fcbd8dbaf}
-      WEAVE_STROM_TOKEN: ${WEAVE_STROM_TOKEN:-bench-strom-key-for-local-use-only}
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_ADAPTER_1_TOKEN:-strom-node-1.0.dc18eb10e0f080536c55f9ff6569abb31d2da3ce4f782b294dd0d32fcbd8dbaf}
+      CONNECT_STROM_TOKEN: ${CONNECT_STROM_TOKEN:-bench-strom-key-for-local-use-only}
       SSL_CERT_FILE: /tls/ca.pem
     volumes:
-      - ./config/adapter-1.yaml:/etc/weave/node.yaml:ro
+      - ./config/adapter-1.yaml:/etc/connect/node.yaml:ro
       - ./tls/public:/tls:ro
     depends_on:
       tls-certs:
@@ -307,11 +307,11 @@ services:
 
   strom-2:
     image: eyevinntechnology/strom:0.6.10
-    container_name: ow-strom-2
+    container_name: oc-strom-2
     environment:
       STROM_PORT: "8080"
       STROM_DATA_DIR: /data
-      STROM_API_KEY: ${WEAVE_STROM_TOKEN:-bench-strom-key-for-local-use-only}
+      STROM_API_KEY: ${CONNECT_STROM_TOKEN:-bench-strom-key-for-local-use-only}
     volumes:
       - strom2-data:/data
     ports:
@@ -327,15 +327,15 @@ services:
       start_period: 20s
 
   adapter-2:
-    <<: *weave
-    container_name: ow-adapter-2
-    command: ["weave-adapter-strom", "--config", "/etc/weave/node.yaml"]
+    <<: *connect
+    container_name: oc-adapter-2
+    command: ["connect-adapter-strom", "--config", "/etc/connect/node.yaml"]
     environment:
-      WEAVE_SOUTHBOUND_TOKEN: ${WEAVE_ADAPTER_2_TOKEN:-strom-node-2.0.f6a9e27d3f0c5cac5cadb705f27e8659a31a43836822b29d2aac602607ea79f3}
-      WEAVE_STROM_TOKEN: ${WEAVE_STROM_TOKEN:-bench-strom-key-for-local-use-only}
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_ADAPTER_2_TOKEN:-strom-node-2.0.f6a9e27d3f0c5cac5cadb705f27e8659a31a43836822b29d2aac602607ea79f3}
+      CONNECT_STROM_TOKEN: ${CONNECT_STROM_TOKEN:-bench-strom-key-for-local-use-only}
       SSL_CERT_FILE: /tls/ca.pem
     volumes:
-      - ./config/${WEAVE_ADAPTER_2_CONFIG:-adapter-2.yaml}:/etc/weave/node.yaml:ro
+      - ./config/${CONNECT_ADAPTER_2_CONFIG:-adapter-2.yaml}:/etc/connect/node.yaml:ro
       - ./tls/public:/tls:ro
     depends_on:
       tls-certs:
@@ -352,11 +352,11 @@ services:
 
   strom-3:
     image: eyevinntechnology/strom:0.6.10
-    container_name: ow-strom-3
+    container_name: oc-strom-3
     environment:
       STROM_PORT: "8080"
       STROM_DATA_DIR: /data
-      STROM_API_KEY: ${WEAVE_STROM_TOKEN:-bench-strom-key-for-local-use-only}
+      STROM_API_KEY: ${CONNECT_STROM_TOKEN:-bench-strom-key-for-local-use-only}
     volumes:
       - strom3-data:/data
     ports:
@@ -372,15 +372,15 @@ services:
       start_period: 20s
 
   adapter-3:
-    <<: *weave
-    container_name: ow-adapter-3
-    command: ["weave-adapter-strom", "--config", "/etc/weave/node.yaml"]
+    <<: *connect
+    container_name: oc-adapter-3
+    command: ["connect-adapter-strom", "--config", "/etc/connect/node.yaml"]
     environment:
-      WEAVE_SOUTHBOUND_TOKEN: ${WEAVE_ADAPTER_3_TOKEN:-strom-node-3.0.63f1a6fc0325ad42d897365d027ebbc08c60b9f4b5a3f82c4ff1cda8cb5ca267}
-      WEAVE_STROM_TOKEN: ${WEAVE_STROM_TOKEN:-bench-strom-key-for-local-use-only}
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_ADAPTER_3_TOKEN:-strom-node-3.0.63f1a6fc0325ad42d897365d027ebbc08c60b9f4b5a3f82c4ff1cda8cb5ca267}
+      CONNECT_STROM_TOKEN: ${CONNECT_STROM_TOKEN:-bench-strom-key-for-local-use-only}
       SSL_CERT_FILE: /tls/ca.pem
     volumes:
-      - ./config/adapter-3.yaml:/etc/weave/node.yaml:ro
+      - ./config/adapter-3.yaml:/etc/connect/node.yaml:ro
       - ./tls/public:/tls:ro
     depends_on:
       tls-certs:
@@ -397,11 +397,11 @@ services:
 
   strom-4:
     image: eyevinntechnology/strom:0.6.10
-    container_name: ow-strom-4
+    container_name: oc-strom-4
     environment:
       STROM_PORT: "8080"
       STROM_DATA_DIR: /data
-      STROM_API_KEY: ${WEAVE_STROM_TOKEN:-bench-strom-key-for-local-use-only}
+      STROM_API_KEY: ${CONNECT_STROM_TOKEN:-bench-strom-key-for-local-use-only}
     volumes:
       - strom4-data:/data
     ports:
@@ -417,15 +417,15 @@ services:
       start_period: 20s
 
   adapter-4:
-    <<: *weave
-    container_name: ow-adapter-4
-    command: ["weave-adapter-strom", "--config", "/etc/weave/node.yaml"]
+    <<: *connect
+    container_name: oc-adapter-4
+    command: ["connect-adapter-strom", "--config", "/etc/connect/node.yaml"]
     environment:
-      WEAVE_SOUTHBOUND_TOKEN: ${WEAVE_ADAPTER_4_TOKEN:-strom-node-4.0.dc5a557a1c746f319ed4f7590f21a9aaa5c19d0d4ffcff9d0ecd81ca1f69c14f}
-      WEAVE_STROM_TOKEN: ${WEAVE_STROM_TOKEN:-bench-strom-key-for-local-use-only}
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_ADAPTER_4_TOKEN:-strom-node-4.0.dc5a557a1c746f319ed4f7590f21a9aaa5c19d0d4ffcff9d0ecd81ca1f69c14f}
+      CONNECT_STROM_TOKEN: ${CONNECT_STROM_TOKEN:-bench-strom-key-for-local-use-only}
       SSL_CERT_FILE: /tls/ca.pem
     volumes:
-      - ./config/adapter-4.yaml:/etc/weave/node.yaml:ro
+      - ./config/adapter-4.yaml:/etc/connect/node.yaml:ro
       - ./tls/public:/tls:ro
     depends_on:
       tls-certs:
@@ -444,16 +444,16 @@ services:
     build:
       context: ..
       dockerfile: bench/Dockerfile.browser
-    image: open-weave-bench-browser:local
-    container_name: ow-browser
+    image: open-connect-bench-browser:local
+    container_name: oc-browser
     profiles: ["browser"]
     restart: "no"
     shm_size: "1gb"
     environment:
-      WEAVE_SOUTHBOUND_URL: https://10.97.25.25:9443
-      WEAVE_SOUTHBOUND_TOKEN: ${WEAVE_BROWSER_TOKEN:-browser-bench.0.ed7971623b06be894b581ccca99662bdb3983d232e8737a2c3e5a46455b00540}
+      CONNECT_SOUTHBOUND_URL: https://10.97.25.25:9443
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_BROWSER_TOKEN:-browser-bench.0.ed7971623b06be894b581ccca99662bdb3983d232e8737a2c3e5a46455b00540}
       NODE_EXTRA_CA_CERTS: /tls/ca.pem
-      WEAVE_BROWSER_MEDIA: ${WEAVE_BROWSER_MEDIA:-}
+      CONNECT_BROWSER_MEDIA: ${CONNECT_BROWSER_MEDIA:-}
     volumes:
       - ../nodes/browser:/work:ro
       - ./tls/public:/tls:ro
@@ -472,18 +472,18 @@ services:
         db="sql:$$HOME/.pki/nssdb"
         mkdir -p "$$HOME/.pki/nssdb"
         [ -f "$$HOME/.pki/nssdb/cert9.db" ] || certutil -d "$$db" -N --empty-password
-        certutil -d "$$db" -A -t C,, -n open-weave-bench-ca -i /tls/ca.pem
+        certutil -d "$$db" -A -t C,, -n open-connect-bench-ca -i /tls/ca.pem
         exec node /work/check.mjs --serve 8000 --stay
 
   browser-2:
-    image: open-weave-bench-browser:local
-    container_name: ow-browser-2
+    image: open-connect-bench-browser:local
+    container_name: oc-browser-2
     profiles: ["browser"]
     restart: "no"
     shm_size: "1gb"
     environment:
-      WEAVE_SOUTHBOUND_URL: https://10.97.25.25:9443
-      WEAVE_SOUTHBOUND_TOKEN: ${WEAVE_BROWSER_2_TOKEN:-browser-bench-2.0.01b7733061b2fec1c70751c03fd9c027e962589084f12bbb6cee4c9a9e65ea82}
+      CONNECT_SOUTHBOUND_URL: https://10.97.25.25:9443
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_BROWSER_2_TOKEN:-browser-bench-2.0.01b7733061b2fec1c70751c03fd9c027e962589084f12bbb6cee4c9a9e65ea82}
       NODE_EXTRA_CA_CERTS: /tls/ca.pem
     volumes:
       - ../nodes/browser:/work:ro
@@ -503,12 +503,12 @@ services:
         db="sql:$$HOME/.pki/nssdb"
         mkdir -p "$$HOME/.pki/nssdb"
         [ -f "$$HOME/.pki/nssdb/cert9.db" ] || certutil -d "$$db" -N --empty-password
-        certutil -d "$$db" -A -t C,, -n open-weave-bench-ca -i /tls/ca.pem
+        certutil -d "$$db" -A -t C,, -n open-connect-bench-ca -i /tls/ca.pem
         exec node /work/check.mjs --serve 8000 --stay
 
   producer:
     <<: *media
-    container_name: ow-producer
+    container_name: oc-producer
     profiles: ["producer"]
     environment:
       - PRODUCER_TARGET
@@ -520,7 +520,7 @@ services:
 
   consumer:
     <<: *media
-    container_name: ow-consumer
+    container_name: oc-consumer
     profiles: ["consumer"]
     environment:
       - CONSUMER_SOURCE
@@ -532,7 +532,7 @@ services:
 
   consumer-2:
     <<: *media
-    container_name: ow-consumer-2
+    container_name: oc-consumer-2
     profiles: ["consumer"]
     environment:
       CONSUMER_SOURCE: ${CONSUMER_SOURCE_2:-}
@@ -544,7 +544,7 @@ services:
 
   producer-3:
     <<: *media
-    container_name: ow-producer-3
+    container_name: oc-producer-3
     profiles: ["producer"]
     environment:
       - PRODUCER_TARGET
@@ -556,7 +556,7 @@ services:
 
   consumer-3:
     <<: *media
-    container_name: ow-consumer-3
+    container_name: oc-consumer-3
     profiles: ["consumer"]
     environment:
       - CONSUMER_SOURCE
@@ -568,7 +568,7 @@ services:
 
   producer-4:
     <<: *media
-    container_name: ow-producer-4
+    container_name: oc-producer-4
     profiles: ["producer"]
     environment:
       - PRODUCER_TARGET
@@ -580,7 +580,7 @@ services:
 
   consumer-4:
     <<: *media
-    container_name: ow-consumer-4
+    container_name: oc-consumer-4
     profiles: ["consumer"]
     environment:
       - CONSUMER_SOURCE

@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "open-weave southbound API",
+    "title": "open-connect southbound API",
     "version": "0.1.0-rc.1"
   },
   "paths": {
@@ -753,7 +753,7 @@
                       "type": "string",
                       "enum": [
                         "raw",
-                        "weave_timed_v1"
+                        "connect_timed_v1"
                       ]
                     },
                     "latency": {
@@ -917,7 +917,7 @@
                       "type": "string",
                       "enum": [
                         "raw",
-                        "weave_timed_v1"
+                        "connect_timed_v1"
                       ]
                     },
                     "latency": {
@@ -1083,7 +1083,7 @@
                         "type": "string",
                         "enum": [
                           "raw",
-                          "weave_timed_v1"
+                          "connect_timed_v1"
                         ]
                       },
                       "latency": {

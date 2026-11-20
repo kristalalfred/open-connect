@@ -1,4 +1,4 @@
-use weave_core::{
+use connect_core::{
     DesiredHop, EgressStatus, HopEndpointClass, HopProfile, HopState, HopStatus, LinkCondition,
     NetworkAttachment, NetworkListeners, NodeCapabilities, NodeDescriptor, NodeStatus,
     NodeTopology, ObservedState, Path, PortRange, ResolvedAddr, RoleSet, SocketSpec, SocketStatus,
@@ -23,7 +23,7 @@ fn srt_forward() -> HopProfile {
         ingress: srt(),
         egress: srt(),
         max_egresses: None,
-        media_behavior: weave_core::MediaBehavior::Unknown,
+        media_behavior: connect_core::MediaBehavior::Unknown,
         merge: false,
         accepts: None,
     }
@@ -130,7 +130,7 @@ fn named(name: &str, destinations: &[(&str, &str)]) -> StreamDefinition {
     StreamDefinition {
         name: name.to_string(),
         enabled: true,
-        format_policy: weave_core::FormatPolicy::Report,
+        format_policy: connect_core::FormatPolicy::Report,
         allow_cleartext_links: false,
         source: endpoint("source", &[]),
         destinations: destinations
@@ -214,7 +214,7 @@ fn hop<'a>(path: &'a Path, id: &str) -> &'a DesiredHop {
         .unwrap_or_else(|| panic!("no hop {id}"))
 }
 
-const STUDIO_BRIDGE: &str = "weave-feed-bridge-studio-0";
+const STUDIO_BRIDGE: &str = "connect-feed-bridge-studio-0";
 
 #[test]
 fn a_bridge_stays_on_its_relay_when_an_earlier_relay_comes_back() {
@@ -312,10 +312,13 @@ fn a_new_destination_takes_the_next_relay_and_leaves_an_existing_bridge_alone() 
         &nodes,
         &reported(&before, &nodes, HopState::Provisioned),
     );
-    for id in [STUDIO_BRIDGE, "weave-feed-receiver-studio"] {
+    for id in [STUDIO_BRIDGE, "connect-feed-receiver-studio"] {
         assert_eq!(hop(&after, id), hop(&before, id), "{id} is unchanged");
     }
-    assert_eq!(hop(&after, "weave-feed-bridge-alpha-0").node_id, "relay-b");
+    assert_eq!(
+        hop(&after, "connect-feed-bridge-alpha-0").node_id,
+        "relay-b"
+    );
     let branches: Vec<_> = after.hops[0]
         .egresses
         .iter()
@@ -326,11 +329,11 @@ fn a_new_destination_takes_the_next_relay_and_leaves_an_existing_bridge_alone() 
     assert_eq!(
         order,
         [
-            "weave-feed-sender",
-            "weave-feed-bridge-alpha-0",
-            "weave-feed-receiver-alpha",
+            "connect-feed-sender",
+            "connect-feed-bridge-alpha-0",
+            "connect-feed-receiver-alpha",
             STUDIO_BRIDGE,
-            "weave-feed-receiver-studio",
+            "connect-feed-receiver-studio",
         ],
         "hops stay in destination id order"
     );
@@ -384,7 +387,11 @@ fn a_new_stream_that_sorts_first_takes_the_next_relay_and_leaves_an_existing_one
         "the existing stream's hops, ports and keys are unchanged"
     );
     assert_eq!(
-        hop_in(&after.hops_by_stream["alpha"], "weave-alpha-bridge-truck-0").node_id,
+        hop_in(
+            &after.hops_by_stream["alpha"],
+            "connect-alpha-bridge-truck-0"
+        )
+        .node_id,
         "relay-b"
     );
     let names: Vec<_> = after
@@ -399,7 +406,7 @@ fn a_new_stream_that_sorts_first_takes_the_next_relay_and_leaves_an_existing_one
         .collect();
     assert_eq!(
         senders,
-        ["weave-alpha-sender", "weave-feed-sender"],
+        ["connect-alpha-sender", "connect-feed-sender"],
         "a node's desired hops stay in stream name order"
     );
 

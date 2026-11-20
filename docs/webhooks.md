@@ -5,9 +5,9 @@ offline or comes back, and when a stream's conditions change.
 
 | Variable | Meaning |
 |---|---|
-| `WEAVE_WEBHOOK_URL` | Absolute URL receiving events. Unset or blank turns webhooks off. |
-| `WEAVE_WEBHOOK_TOKEN` | Optional. Sent to the receiver as `Authorization: Bearer <token>`. |
-| `WEAVE_WEBHOOK_EVENTS` | Comma-separated event types to deliver. Unset or empty delivers all of them. |
+| `CONNECT_WEBHOOK_URL` | Absolute URL receiving events. Unset or blank turns webhooks off. |
+| `CONNECT_WEBHOOK_TOKEN` | Optional. Sent to the receiver as `Authorization: Bearer <token>`. |
+| `CONNECT_WEBHOOK_EVENTS` | Comma-separated event types to deliver. Unset or empty delivers all of them. |
 
 ## Events
 
@@ -15,11 +15,11 @@ offline or comes back, and when a stream's conditions change.
 |---|---|
 | `node.registered` | Every accepted registration, including a node that is already online registering again, as a page reload does. |
 | `node.online` | A node heartbeats after being marked offline. |
-| `node.offline` | A node passes `WEAVE_NODE_TTL_SECS` without a heartbeat. |
-| `node.forgotten` | An offline node passes `WEAVE_NODE_FORGET_SECS` without a heartbeat and is removed. A node a stored stream names is never removed. |
+| `node.offline` | A node passes `CONNECT_NODE_TTL_SECS` without a heartbeat. |
+| `node.forgotten` | An offline node passes `CONNECT_NODE_FORGET_SECS` without a heartbeat and is removed. A node a stored stream names is never removed. |
 | `stream.changed` | A reconcile tick computes a stream's conditions for the first time, or computes conditions that differ from the previous tick's in `type`, `status` or `reason`, on the stream or any destination. |
 
-`WEAVE_WEBHOOK_EVENTS=node.registered,node.online,node.offline,node.forgotten`
+`CONNECT_WEBHOOK_EVENTS=node.registered,node.online,node.offline,node.forgotten`
 delivers node events only. The full payload schema is
 [`contracts/json-schema/webhook-event.json`](../contracts/json-schema/webhook-event.json).
 

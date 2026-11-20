@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
+use connect_core::auth::Token;
+use connect_core::{NodeStatus, PathStatus, StreamDefinition, StreamTransport, read};
+use connect_strom::StromClient;
 use reqwest::header::{ETAG, IF_MATCH, IF_NONE_MATCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::process::Command;
-use weave_core::auth::Token;
-use weave_core::{NodeStatus, PathStatus, StreamDefinition, StreamTransport, read};
-use weave_strom::StromClient;
 
 use crate::media::{self, Probe, Watch};
 use crate::report::{Report, redact};
@@ -122,7 +122,7 @@ impl Bench {
 
     pub async fn preflight(&self) -> Result<()> {
         for service in SERVICES {
-            let container = format!("ow-{service}");
+            let container = format!("oc-{service}");
             self.report.event(
                 "preflight_check",
                 json!({"detail": format!("checking {container}")}),
@@ -134,7 +134,7 @@ impl Bench {
             );
             ensure!(value[0]["State"]["Paused"] != true, "{container} is paused");
             ensure!(
-                value[0]["Config"]["Labels"]["com.docker.compose.project"] == "ow-bench",
+                value[0]["Config"]["Labels"]["com.docker.compose.project"] == "oc-bench",
                 "{container} is not owned by the bench"
             );
             self.report.event("runtime_artifact", json!({"container": container, "image": value[0]["Image"], "reference": value[0]["Config"]["Image"]}))?;
@@ -470,7 +470,7 @@ impl Bench {
     ) -> Result<()> {
         let mut spec = crate::scenario::read_manifest(file)?;
         spec.name = format!("{}-{alias}", self.prefix);
-        weave_core::validate_resource_id(&spec.name)?;
+        connect_core::validate_resource_id(&spec.name)?;
         let mut request = self
             .http
             .post(format!("{}/streams", self.url))
@@ -671,7 +671,7 @@ impl Bench {
             "network",
             "ls",
             "--filter",
-            "label=com.docker.compose.project=ow-bench",
+            "label=com.docker.compose.project=oc-bench",
             "--filter",
             &format!("label=com.docker.compose.network=net_{site}"),
             "--format",
@@ -682,7 +682,7 @@ impl Bench {
             network.split_whitespace().count() == 1,
             "expected one bench network for {site}"
         );
-        let name = format!("ow-{}-{suffix}", self.prefix);
+        let name = format!("oc-{}-{suffix}", self.prefix);
         self.containers.push(name.clone());
         docker(&[
             "run",
@@ -692,11 +692,11 @@ impl Bench {
             "--network",
             network.trim(),
             "--label",
-            &format!("open-weave.bench.site={site}"),
+            &format!("open-connect.bench.site={site}"),
             "--label",
-            &format!("open-weave.bench.run={}", self.prefix),
+            &format!("open-connect.bench.run={}", self.prefix),
             "--label",
-            "open-weave.bench.project=ow-bench",
+            "open-connect.bench.project=oc-bench",
             "--env",
             &format!("BENCH_URL={url}"),
             "--env",
@@ -724,7 +724,7 @@ impl Bench {
         destination: Option<&str>,
         seconds: u64,
         nodes: Option<&[String]>,
-        format_reason: Option<weave_core::StreamConditionReason>,
+        format_reason: Option<connect_core::StreamConditionReason>,
     ) -> Result<()> {
         let name = self.name(alias)?;
         let started = Instant::now();
@@ -762,7 +762,7 @@ impl Bench {
                         let format_matches = format_reason.is_none_or(|expected| {
                             conditions.iter().any(|condition| {
                                 condition.condition_type
-                                    == weave_core::StreamConditionType::FormatCompatible
+                                    == connect_core::StreamConditionType::FormatCompatible
                                     && condition.reason == expected
                             })
                         });
@@ -776,7 +776,7 @@ impl Bench {
                         {
                             if format_reason.is_some()
                                 && status == PathStatus::Pending
-                                && stream.format_policy == weave_core::FormatPolicy::Strict
+                                && stream.format_policy == connect_core::FormatPolicy::Strict
                             {
                                 let response = self
                                     .http
@@ -848,7 +848,7 @@ impl Bench {
             "service_action",
             json!({"service": actual, "action": action}),
         )?;
-        let container = format!("ow-{actual}");
+        let container = format!("oc-{actual}");
         let args = match action {
             ServiceAction::Stop => vec!["stop", "--time", "5", &container],
             ServiceAction::Start => vec!["start", &container],
@@ -911,7 +911,7 @@ impl Bench {
         .await?;
         Ok(flows
             .into_iter()
-            .filter(|f| f.name.starts_with("weave-"))
+            .filter(|f| f.name.starts_with("connect-"))
             .map(|f| FlowIdentity {
                 node,
                 name: f.name,
@@ -1048,7 +1048,7 @@ impl Bench {
                 "cleanup_action",
                 json!({"detail": format!("restoring {service}")}),
             );
-            let container = format!("ow-{service}");
+            let container = format!("oc-{service}");
             match docker(&["inspect", "--format", "{{.State.Paused}}", &container]).await {
                 Ok(paused) if paused.trim() == "true" => {
                     if let Err(error) = docker(&["unpause", &container]).await {
@@ -1058,7 +1058,7 @@ impl Bench {
                 Err(error) => errors.push(format!("inspect {service}: {error:#}")),
                 _ => (),
             }
-            if let Err(error) = docker(&["start", &format!("ow-{service}")]).await {
+            if let Err(error) = docker(&["start", &format!("oc-{service}")]).await {
                 errors.push(format!("restore {service}: {error:#}"));
             }
         }
@@ -1140,12 +1140,12 @@ pub fn media_url(endpoint: &read::EndpointAddr, spec: &StreamTransport) -> Resul
 }
 
 fn owns_flow(stream: &StreamDefinition, name: &str) -> bool {
-    if name == format!("weave-{}-sender", stream.name) {
+    if name == format!("connect-{}-sender", stream.name) {
         return true;
     }
     stream.destinations.iter().any(|destination| {
         if destination.node().is_some()
-            && name == format!("weave-{}-receiver-{}", stream.name, destination.id)
+            && name == format!("connect-{}-receiver-{}", stream.name, destination.id)
         {
             return true;
         }
@@ -1155,7 +1155,7 @@ fn owns_flow(stream: &StreamDefinition, name: &str) -> bool {
             } else {
                 format!("{}.2", destination.id)
             };
-            name.strip_prefix(&format!("weave-{}-bridge-{branch}-", stream.name))
+            name.strip_prefix(&format!("connect-{}-bridge-{branch}-", stream.name))
                 .is_some_and(|position| {
                     position
                         .parse::<usize>()
@@ -1212,7 +1212,7 @@ pub fn telemetry(bench: &Bench) -> tokio::task::JoinHandle<()> {
     let token = bench.token.clone();
     let strom_token = bench.strom_token.clone();
     let report = bench.report.clone();
-    let prefix = format!("weave-{}-", bench.prefix);
+    let prefix = format!("connect-{}-", bench.prefix);
     tokio::spawn(async move {
         loop {
             for path in ["/status", "/nodes"] {
@@ -1296,24 +1296,24 @@ mod tests {
         let mut stream = crate::scenario::read_manifest(&root).unwrap();
         stream.name = "feed".into();
         for name in [
-            "weave-feed-sender",
-            "weave-feed-receiver-output",
-            "weave-feed-bridge-output-0",
+            "connect-feed-sender",
+            "connect-feed-receiver-output",
+            "connect-feed-bridge-output-0",
         ] {
             assert!(owns_flow(&stream, name), "{name}");
         }
         for name in [
-            "weave-feed-backup-sender",
-            "weave-feed-backup-receiver-output",
-            "weave-feed-receiver-other",
-            "weave-feed-bridge-output-0-extra",
-            "weave-feed-bridge-output-00",
-            "weave-feed-bridge-output.2-0",
+            "connect-feed-backup-sender",
+            "connect-feed-backup-receiver-output",
+            "connect-feed-receiver-other",
+            "connect-feed-bridge-output-0-extra",
+            "connect-feed-bridge-output-00",
+            "connect-feed-bridge-output.2-0",
         ] {
             assert!(!owns_flow(&stream, name), "{name}");
         }
         stream.destinations[0].paths = 2;
-        assert!(owns_flow(&stream, "weave-feed-bridge-output.2-0"));
+        assert!(owns_flow(&stream, "connect-feed-bridge-output.2-0"));
     }
 
     #[test]

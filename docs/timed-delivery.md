@@ -1,6 +1,6 @@
 # Timed delivery and redundant paths
 
-The native `weave-node` runtime implements fixed timed release and automatic
+The native `connect-node` runtime implements fixed timed release and automatic
 calibration over encrypted SRT links. Strom and browser nodes do not implement
 these roles. Media stays in the nodes, outside the controller.
 
@@ -135,7 +135,7 @@ These checks do not authenticate an otherwise untrusted media node.
 ## Clock configuration
 
 Origins and receivers need the same clock domain and a current error bound.
-Forwarders need no synchronized clock. Weave does not synchronize clocks.
+Forwarders need no synchronized clock. open-connect does not synchronize clocks.
 
 A local demo may use:
 
@@ -157,7 +157,7 @@ For separate hosts, configure a trusted external clock-status provider:
 clock:
   provider: external
   domain: production-tai
-  status_file: /run/weave/clock.json
+  status_file: /run/connect/clock.json
 ```
 
 The external synchronization service must atomically replace that JSON file:
@@ -201,7 +201,7 @@ ingress queue. Each transport has bounded queues; a slow branch
 does not block the other branch. Output absence, backpressure and exhausted
 buffers drop affected records and appear in status.
 
-The controller requires explicit `weave_timed_v1` origin, forwarding and
+The controller requires explicit `connect_timed_v1` origin, forwarding and
 receiver capabilities. Receivers share the origin's declared clock domain.
 Internal SRT sockets carry an explicit payload kind and controller-derived
 encryption keys. Ordinary Strom and browser profiles cannot satisfy a timed

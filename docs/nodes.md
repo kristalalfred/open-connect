@@ -221,7 +221,7 @@ every heartbeat:
 | `uplink.gateway` | Optional. The default gateway's hardware address. |
 | `uplink.reflexive` | Up to eight `{ server, mapped }` pairs: a STUN server and the address and port it saw. |
 
-[`weave-reach`](../crates/reach) builds the observation. It reads the uplink
+[`connect-reach`](../crates/reach) builds the observation. It reads the uplink
 every 2 s and asks `stun.cloudflare.com:3478` and `stun.l.google.com:19302` when
 the uplink changes, every 60 s, and on every read while it holds no answer,
 allowing each server 1.5 s including its DNS lookup:
@@ -231,7 +231,7 @@ allowing each server 1.5 s including its DNS lookup:
   5 minutes is dropped; when no server answers, every kept answer stays.
 - A read that finds the same interface, address and prefix but no gateway
   hardware address keeps the last known one.
-- When the uplink cannot be read, `weave-reach` reports the previous observation
+- When the uplink cannot be read, `connect-reach` reports the previous observation
   for ten more reads (about 20 s), then an observation without `uplink`. It
   then reads the uplink every 250 ms, and when the same uplink returns it
   reports the previous observation again on that read.

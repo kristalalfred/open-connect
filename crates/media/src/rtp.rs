@@ -4,13 +4,13 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use connect_core::{
+    HopState, LinkCondition, LinkStats, NodeInput, NodeOutput, ResolvedAddr, SocketStatus, Track,
+};
 use serde::Deserialize;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
-use weave_core::{
-    HopState, LinkCondition, LinkStats, NodeInput, NodeOutput, ResolvedAddr, SocketStatus, Track,
-};
 
 use crate::clock::Clock;
 use crate::transport::Input;
@@ -81,7 +81,7 @@ impl RtpConfig {
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
-        let issues = weave_core::validation::validate_local_io(
+        let issues = connect_core::validation::validate_local_io(
             &self.declared_inputs(),
             &self.declared_outputs(),
             "rtp.",

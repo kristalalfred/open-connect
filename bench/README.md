@@ -175,20 +175,20 @@ Open the URL printed by `page`. The `docker-host` attachment uses signalling at
 `just bench hook-sink` listens on host port 29099 and prints deliveries and their
 Authorization header. Start it before `just bench up`. Both controllers default
 to `http://host.docker.internal:29099` with token `bench-webhook-token`.
-Export `WEAVE_WEBHOOK_URL=` before starting the stack to disable delivery.
+Export `CONNECT_WEBHOOK_URL=` before starting the stack to disable delivery.
 See [Webhooks](../docs/webhooks.md) for payloads and delivery limitations.
 
 ## Host ports
 
 | Port | Service |
 |------|---------|
-| 29443 | the API over TLS through nginx, which the recipes use (`SSL_CERT_FILE=bench/tls/public/ca.pem WEAVE_NORTHBOUND_URL=https://localhost:29443 weave ...`) |
+| 29443 | the API over TLS through nginx, which the recipes use (`SSL_CERT_FILE=bench/tls/public/ca.pem CONNECT_NORTHBOUND_URL=https://localhost:29443 connect ...`) |
 | 29080 | the API in plaintext through nginx; `scripts/endpoints.sh` and `just bench page` use it |
 | 29082 | controller's API; a standby forwards to the leader |
 | 29083 | controller-2's API |
 | 29092 | controller's dashboard at `/ui`, `/view` and `/status`; a standby answers `503 not_leader` |
 | 29093 | controller-2's dashboard |
-| 28080 | strom-1 API; `/api` routes need `WEAVE_STROM_TOKEN` |
+| 28080 | strom-1 API; `/api` routes need `CONNECT_STROM_TOKEN` |
 | 28081 | strom-2 API |
 | 28082 | strom-3 API (host→container; grants no route into net_node3) |
 | 28083 | strom-4 API (host→container; grants no route into net_node4) |
@@ -200,16 +200,16 @@ The bench enables authentication with development credentials:
 
 | Variable | Default | Used by |
 |---|---|---|
-| `WEAVE_NORTHBOUND_TOKEN` | `bench-northbound-token` | both controllers, CLI, `endpoints.sh` |
-| `WEAVE_SOUTHBOUND_KEY` | `bench-southbound-key-for-local-use-only` | both controllers, `just bench node-token` |
-| `WEAVE_ADAPTER_{1,2,3,4}_TOKEN` | `strom-node-{1,2,3,4}`'s epoch-0 token under the default key | adapter-1 to adapter-4; the recipes present node 1's for southbound reads |
-| `WEAVE_BROWSER_TOKEN` | `browser-bench`'s epoch-0 token under the default key | the in-bench browser page, which takes its node id from it |
-| `WEAVE_BROWSER_2_TOKEN` | `browser-bench-2`'s epoch-0 token under the default key | the second in-bench page (`browser-2`) |
-| `WEAVE_SRT_KEY_SECRET` | `bench-srt-key-secret-for-local-use-only` | both controllers, to derive the keys of SRT links between nodes |
-| `WEAVE_SOUTHBOUND_MIN_EPOCHS` | unset | both controllers: `<id>=<epoch>` pairs that revoke a node's older tokens |
-| `WEAVE_STROM_TOKEN` | `bench-strom-key-for-local-use-only` | every Strom as `STROM_API_KEY`, every adapter, the recipes and `weave-bench`; `/whip` and `/whep` need no key |
+| `CONNECT_NORTHBOUND_TOKEN` | `bench-northbound-token` | both controllers, CLI, `endpoints.sh` |
+| `CONNECT_SOUTHBOUND_KEY` | `bench-southbound-key-for-local-use-only` | both controllers, `just bench node-token` |
+| `CONNECT_ADAPTER_{1,2,3,4}_TOKEN` | `strom-node-{1,2,3,4}`'s epoch-0 token under the default key | adapter-1 to adapter-4; the recipes present node 1's for southbound reads |
+| `CONNECT_BROWSER_TOKEN` | `browser-bench`'s epoch-0 token under the default key | the in-bench browser page, which takes its node id from it |
+| `CONNECT_BROWSER_2_TOKEN` | `browser-bench-2`'s epoch-0 token under the default key | the second in-bench page (`browser-2`) |
+| `CONNECT_SRT_KEY_SECRET` | `bench-srt-key-secret-for-local-use-only` | both controllers, to derive the keys of SRT links between nodes |
+| `CONNECT_SOUTHBOUND_MIN_EPOCHS` | unset | both controllers: `<id>=<epoch>` pairs that revoke a node's older tokens |
+| `CONNECT_STROM_TOKEN` | `bench-strom-key-for-local-use-only` | every Strom as `STROM_API_KEY`, every adapter, the recipes and `connect-bench`; `/whip` and `/whep` need no key |
 
-If you change `WEAVE_SOUTHBOUND_KEY`, also set the four adapter and two browser
+If you change `CONNECT_SOUTHBOUND_KEY`, also set the four adapter and two browser
 token variables. `just bench node-token ID` derives a token under the current
 key. Recipes supply authentication headers; direct API calls must supply them.
 

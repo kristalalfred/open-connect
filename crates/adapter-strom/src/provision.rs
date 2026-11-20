@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use serde_json::Value;
-use weave_core::{
+use connect_core::{
     DesiredHop, HopState, LinkCondition, ResolvedAddr, RistSocket, SocketRole, SocketSpec,
     SrtSocket, is_managed_hop_id,
 };
-use weave_strom::{FlowSpec, SrtUri, StromFlow, flow_spec_from_hop, hop_srt_uris};
+use connect_strom::{FlowSpec, SrtUri, StromFlow, flow_spec_from_hop, hop_srt_uris};
+use serde_json::Value;
 
 const STALL_POLLS: u32 = 3;
 
@@ -381,7 +381,7 @@ pub fn resolved_addr(spec: &SocketSpec, listener_host: Option<&str>) -> Option<R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use weave_core::{DesiredEgress, HopRole, SignallingTransport, Track};
+    use connect_core::{DesiredEgress, HopRole, SignallingTransport, Track};
 
     fn hop(id: &str) -> DesiredHop {
         DesiredHop {
@@ -411,22 +411,22 @@ mod tests {
 
     #[test]
     fn creates_desired_hops_without_a_matching_flow() {
-        let desired = vec![hop("weave-a"), hop("weave-b")];
-        let flows = vec![flow("weave-a", "id-a", true)];
+        let desired = vec![hop("connect-a"), hop("connect-b")];
+        let flows = vec![flow("connect-a", "id-a", true)];
 
         let plan = diff_hops(&desired, &flows);
 
         let created: Vec<_> = plan.create.iter().map(|h| h.id.as_str()).collect();
-        assert_eq!(created, vec!["weave-b"]);
+        assert_eq!(created, vec!["connect-b"]);
         assert!(plan.delete.is_empty());
     }
 
     #[test]
     fn deletes_only_managed_flows_no_longer_desired() {
-        let desired = vec![hop("weave-a")];
+        let desired = vec![hop("connect-a")];
         let flows = vec![
-            flow("weave-a", "id-a", true),
-            flow("weave-stale", "id-stale", true),
+            flow("connect-a", "id-a", true),
+            flow("connect-stale", "id-stale", true),
             flow("operator-manual", "id-manual", true),
         ];
 
@@ -467,9 +467,9 @@ mod tests {
 
     #[test]
     fn drifted_flow_is_deleted_and_recreated() {
-        let desired = vec![hop("weave-a")];
+        let desired = vec![hop("connect-a")];
         let flows = vec![flow_with_uris(
-            "weave-a",
+            "connect-a",
             "id-a",
             "srt://:9999?mode=listener",
             "srt://10.0.0.2:7002?mode=caller",
@@ -479,7 +479,7 @@ mod tests {
 
         assert_eq!(plan.delete, vec!["id-a".to_string()]);
         let created: Vec<_> = plan.create.iter().map(|h| h.id.as_str()).collect();
-        assert_eq!(created, vec!["weave-a"]);
+        assert_eq!(created, vec!["connect-a"]);
         assert!(
             plan.start.is_empty(),
             "recreated flow is not also started in place"
@@ -488,7 +488,7 @@ mod tests {
 
     #[test]
     fn a_flow_whose_srt_mode_was_edited_is_recreated() {
-        let desired = vec![hop("weave-a")];
+        let desired = vec![hop("connect-a")];
         for (ingress, egress) in [
             (
                 "srt://:7001?mode=rendezvous&latency=200",
@@ -503,7 +503,7 @@ mod tests {
                 "srt://10.0.0.2:7002?mode=caller&latency=1000",
             ),
         ] {
-            let flows = vec![flow_with_uris("weave-a", "id-a", ingress, egress)];
+            let flows = vec![flow_with_uris("connect-a", "id-a", ingress, egress)];
             let plan = diff_hops(&desired, &flows);
             assert_eq!(plan.delete, vec!["id-a".to_string()], "{ingress} {egress}");
             assert_eq!(plan.create.len(), 1, "{ingress} {egress}");
@@ -512,9 +512,9 @@ mod tests {
 
     #[test]
     fn matching_flow_uris_are_adopted_not_recreated() {
-        let desired = vec![hop("weave-a")];
+        let desired = vec![hop("connect-a")];
         let flows = vec![flow_with_uris(
-            "weave-a",
+            "connect-a",
             "id-a",
             "srt://:7001?mode=listener&latency=200",
             "srt://10.0.0.2:7002?mode=caller&latency=1000",
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn a_flow_whose_latency_differs_is_recreated() {
-        let desired = vec![hop("weave-a")];
+        let desired = vec![hop("connect-a")];
         for (ingress, egress) in [
             (
                 "srt://:7001?mode=listener&latency=120",
@@ -542,7 +542,7 @@ mod tests {
                 "srt://10.0.0.2:7002?mode=caller",
             ),
         ] {
-            let flows = vec![flow_with_uris("weave-a", "id-a", ingress, egress)];
+            let flows = vec![flow_with_uris("connect-a", "id-a", ingress, egress)];
             let plan = diff_hops(&desired, &flows);
             assert_eq!(plan.delete, vec!["id-a".to_string()], "{ingress} {egress}");
             assert_eq!(plan.create.len(), 1, "{ingress} {egress}");
@@ -552,7 +552,7 @@ mod tests {
     fn rist_sender(address: &str, port: u16) -> StromFlow {
         serde_json::from_value(serde_json::json!({
             "id": "id-a",
-            "name": "weave-a",
+            "name": "connect-a",
             "running": true,
             "elements": [
                 { "element_type": "srtsrc",
@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn a_rist_flow_is_adopted_until_its_address_changes() {
-        let mut sender = hop("weave-a");
+        let mut sender = hop("connect-a");
         sender.profile_id = "srt-to-rist".to_string();
         sender.egresses[0].socket = SocketSpec::Rist(RistSocket::Connect {
             host: "10.0.0.2".to_string(),
@@ -612,14 +612,14 @@ mod tests {
             panic!("expected an SRT socket");
         };
         let params = socket.params_mut();
-        params.passphrase = Some(weave_core::Passphrase::new(passphrase));
+        params.passphrase = Some(connect_core::Passphrase::new(passphrase));
         params.pbkeylen = Some(32);
         SocketSpec::Srt(socket)
     }
 
     #[test]
     fn a_flow_whose_key_differs_is_recreated() {
-        let mut keyed_hop = hop("weave-a");
+        let mut keyed_hop = hop("connect-a");
         keyed_hop.egresses[0].socket = keyed(keyed_hop.egresses[0].socket.clone(), "new-link-key");
         let desired = vec![keyed_hop];
         for egress in [
@@ -628,7 +628,7 @@ mod tests {
             "srt://10.0.0.2:7002?mode=caller&latency=1000&passphrase=new%2Dlink%2Dkey&pbkeylen=16",
         ] {
             let flows = vec![flow_with_uris(
-                "weave-a",
+                "connect-a",
                 "id-a",
                 "srt://:7001?mode=listener&latency=200",
                 egress,
@@ -639,7 +639,7 @@ mod tests {
         }
 
         let flows = vec![flow_with_uris(
-            "weave-a",
+            "connect-a",
             "id-a",
             "srt://:7001?mode=listener&latency=200",
             "srt://10.0.0.2:7002?mode=caller&latency=1000&passphrase=new%2Dlink%2Dkey&pbkeylen=32",
@@ -649,8 +649,8 @@ mod tests {
 
     #[test]
     fn starts_desired_flow_that_is_present_but_stopped() {
-        let desired = vec![hop("weave-a")];
-        let flows = vec![flow("weave-a", "id-a", false)];
+        let desired = vec![hop("connect-a")];
+        let flows = vec![flow("connect-a", "id-a", false)];
 
         let plan = diff_hops(&desired, &flows);
 
@@ -660,8 +660,8 @@ mod tests {
 
     #[test]
     fn hop_state_reports_lifecycle_only() {
-        let running = flow("weave-a", "id-a", true);
-        let stopped = flow("weave-a", "id-a", false);
+        let running = flow("connect-a", "id-a", true);
+        let stopped = flow("connect-a", "id-a", false);
 
         assert_eq!(hop_state(None, false), HopState::Pending);
         assert_eq!(hop_state(Some(&stopped), false), HopState::Provisioned);
@@ -718,8 +718,8 @@ mod tests {
     fn a_caller_without_a_handshake_is_restarted_with_backoff() {
         let mut tracker = StallTracker::default();
         let mut poll = |handshaken| {
-            tracker.note_caller("weave-a", handshaken);
-            tracker.caller_due_restart("weave-a")
+            tracker.note_caller("connect-a", handshaken);
+            tracker.caller_due_restart("connect-a")
         };
         let restarts_at: Vec<u32> = (1..=400).filter(|_| poll(false)).collect();
         assert_eq!(restarts_at, vec![6, 18, 42, 90, 186, 282, 378]);
@@ -733,8 +733,8 @@ mod tests {
     fn a_caller_that_shook_hands_but_carries_nothing_is_never_restarted() {
         let mut tracker = StallTracker::default();
         for _ in 0..200 {
-            tracker.note_caller("weave-a", true);
-            assert!(!tracker.caller_due_restart("weave-a"));
+            tracker.note_caller("connect-a", true);
+            assert!(!tracker.caller_due_restart("connect-a"));
         }
     }
 
@@ -742,25 +742,25 @@ mod tests {
     fn never_flowed_hop_never_stalls() {
         let mut tracker = StallTracker::default();
         for _ in 0..6 {
-            assert!(!tracker.observe("weave-a", Side::Ingress, flowing(0)));
+            assert!(!tracker.observe("connect-a", Side::Ingress, flowing(0)));
         }
     }
 
     #[test]
     fn flowed_then_frozen_stalls_after_three_polls() {
         let mut tracker = StallTracker::default();
-        assert!(!tracker.observe("weave-a", Side::Ingress, flowing(1000)));
-        assert!(!tracker.observe("weave-a", Side::Ingress, flowing(2000)));
+        assert!(!tracker.observe("connect-a", Side::Ingress, flowing(1000)));
+        assert!(!tracker.observe("connect-a", Side::Ingress, flowing(2000)));
         assert!(
-            !tracker.observe("weave-a", Side::Ingress, flowing(2000)),
+            !tracker.observe("connect-a", Side::Ingress, flowing(2000)),
             "1 frozen poll"
         );
         assert!(
-            !tracker.observe("weave-a", Side::Ingress, flowing(2000)),
+            !tracker.observe("connect-a", Side::Ingress, flowing(2000)),
             "2 frozen polls"
         );
         assert!(
-            tracker.observe("weave-a", Side::Ingress, flowing(2000)),
+            tracker.observe("connect-a", Side::Ingress, flowing(2000)),
             "3 frozen polls"
         );
     }
@@ -768,16 +768,16 @@ mod tests {
     #[test]
     fn byte_progress_clears_a_stall() {
         let mut tracker = StallTracker::default();
-        tracker.observe("weave-a", Side::Ingress, flowing(1000));
+        tracker.observe("connect-a", Side::Ingress, flowing(1000));
         for _ in 0..3 {
-            tracker.observe("weave-a", Side::Ingress, flowing(2000));
+            tracker.observe("connect-a", Side::Ingress, flowing(2000));
         }
         assert!(
-            tracker.observe("weave-a", Side::Ingress, flowing(2000)),
+            tracker.observe("connect-a", Side::Ingress, flowing(2000)),
             "stalled"
         );
         assert!(
-            !tracker.observe("weave-a", Side::Ingress, flowing(3000)),
+            !tracker.observe("connect-a", Side::Ingress, flowing(3000)),
             "recovers when bytes advance"
         );
     }
@@ -785,45 +785,45 @@ mod tests {
     #[test]
     fn paused_flow_is_never_stalled() {
         let mut tracker = StallTracker::default();
-        tracker.observe("weave-a", Side::Ingress, flowing(1000));
-        tracker.observe("weave-a", Side::Ingress, flowing(2000));
+        tracker.observe("connect-a", Side::Ingress, flowing(1000));
+        tracker.observe("connect-a", Side::Ingress, flowing(2000));
         for _ in 0..4 {
             let obs = SideObservation {
                 bytes: Some(2000),
                 running: true,
                 gst_paused: true,
             };
-            assert!(!tracker.observe("weave-a", Side::Ingress, obs));
+            assert!(!tracker.observe("connect-a", Side::Ingress, obs));
         }
     }
 
     #[test]
     fn stopped_flow_is_never_stalled() {
         let mut tracker = StallTracker::default();
-        tracker.observe("weave-a", Side::Ingress, flowing(1000));
-        tracker.observe("weave-a", Side::Ingress, flowing(2000));
+        tracker.observe("connect-a", Side::Ingress, flowing(1000));
+        tracker.observe("connect-a", Side::Ingress, flowing(2000));
         for _ in 0..4 {
             let obs = SideObservation {
                 bytes: Some(2000),
                 running: false,
                 gst_paused: false,
             };
-            assert!(!tracker.observe("weave-a", Side::Ingress, obs));
+            assert!(!tracker.observe("connect-a", Side::Ingress, obs));
         }
     }
 
     #[test]
     fn counter_settling_lower_then_freezing_still_stalls() {
         let mut tracker = StallTracker::default();
-        tracker.observe("weave-a", Side::Ingress, flowing(71_416_276));
-        tracker.observe("weave-a", Side::Ingress, flowing(72_000_000));
+        tracker.observe("connect-a", Side::Ingress, flowing(71_416_276));
+        tracker.observe("connect-a", Side::Ingress, flowing(72_000_000));
         assert!(
-            !tracker.observe("weave-a", Side::Ingress, flowing(68_958_964)),
+            !tracker.observe("connect-a", Side::Ingress, flowing(68_958_964)),
             "settle-down poll"
         );
-        assert!(!tracker.observe("weave-a", Side::Ingress, flowing(68_958_964)));
+        assert!(!tracker.observe("connect-a", Side::Ingress, flowing(68_958_964)));
         assert!(
-            tracker.observe("weave-a", Side::Ingress, flowing(68_958_964)),
+            tracker.observe("connect-a", Side::Ingress, flowing(68_958_964)),
             "frozen after settle -> stalled"
         );
     }
@@ -832,68 +832,71 @@ mod tests {
     fn frozen_from_first_observation_reads_never_flowed() {
         let mut tracker = StallTracker::default();
         for _ in 0..6 {
-            assert!(!tracker.observe("weave-a", Side::Ingress, flowing(9_299_932)));
+            assert!(!tracker.observe("connect-a", Side::Ingress, flowing(9_299_932)));
         }
     }
 
     #[test]
     fn missing_stats_do_not_advance_a_stall() {
         let mut tracker = StallTracker::default();
-        tracker.observe("weave-a", Side::Ingress, flowing(1000));
-        tracker.observe("weave-a", Side::Ingress, flowing(2000));
+        tracker.observe("connect-a", Side::Ingress, flowing(1000));
+        tracker.observe("connect-a", Side::Ingress, flowing(2000));
         let missing = SideObservation {
             bytes: None,
             running: true,
             gst_paused: false,
         };
         for _ in 0..5 {
-            assert!(!tracker.observe("weave-a", Side::Ingress, missing));
+            assert!(!tracker.observe("connect-a", Side::Ingress, missing));
         }
     }
 
     #[test]
     fn retain_drops_undesired_hops() {
         let mut tracker = StallTracker::default();
-        tracker.observe("weave-a", Side::Ingress, flowing(1000));
-        tracker.observe("weave-a", Side::Egress(0), flowing(1000));
-        tracker.observe("weave-b", Side::Ingress, flowing(1000));
-        let desired: HashSet<&str> = ["weave-a"].into_iter().collect();
+        tracker.observe("connect-a", Side::Ingress, flowing(1000));
+        tracker.observe("connect-a", Side::Egress(0), flowing(1000));
+        tracker.observe("connect-b", Side::Ingress, flowing(1000));
+        let desired: HashSet<&str> = ["connect-a"].into_iter().collect();
         tracker.retain(&desired);
         assert!(
             tracker
                 .hops
-                .contains_key(&("weave-a".to_string(), Side::Ingress))
+                .contains_key(&("connect-a".to_string(), Side::Ingress))
         );
         assert!(
             tracker
                 .hops
-                .contains_key(&("weave-a".to_string(), Side::Egress(0)))
+                .contains_key(&("connect-a".to_string(), Side::Egress(0)))
         );
         assert!(
             !tracker
                 .hops
-                .contains_key(&("weave-b".to_string(), Side::Ingress))
+                .contains_key(&("connect-b".to_string(), Side::Ingress))
         );
     }
 
     #[test]
     fn advanced_reads_only_the_most_recent_poll() {
         let mut tracker = StallTracker::default();
-        assert!(!tracker.advanced("weave-a", Side::Egress(0)), "never seen");
-        tracker.observe("weave-a", Side::Egress(0), flowing(1000));
         assert!(
-            !tracker.advanced("weave-a", Side::Egress(0)),
+            !tracker.advanced("connect-a", Side::Egress(0)),
+            "never seen"
+        );
+        tracker.observe("connect-a", Side::Egress(0), flowing(1000));
+        assert!(
+            !tracker.advanced("connect-a", Side::Egress(0)),
             "a baseline is not progress"
         );
-        tracker.observe("weave-a", Side::Egress(0), flowing(2000));
-        assert!(tracker.advanced("weave-a", Side::Egress(0)));
-        tracker.observe("weave-a", Side::Egress(0), flowing(2000));
+        tracker.observe("connect-a", Side::Egress(0), flowing(2000));
+        assert!(tracker.advanced("connect-a", Side::Egress(0)));
+        tracker.observe("connect-a", Side::Egress(0), flowing(2000));
         assert!(
-            !tracker.advanced("weave-a", Side::Egress(0)),
+            !tracker.advanced("connect-a", Side::Egress(0)),
             "frozen this poll"
         );
         assert!(
-            !tracker.advanced("weave-a", Side::Ingress),
+            !tracker.advanced("connect-a", Side::Ingress),
             "sides are independent"
         );
     }
@@ -901,13 +904,13 @@ mod tests {
     #[test]
     fn egress_branches_track_progress_independently() {
         let mut tracker = StallTracker::default();
-        tracker.observe("weave-a", Side::Egress(0), flowing(1000));
-        tracker.observe("weave-a", Side::Egress(1), flowing(1000));
-        tracker.observe("weave-a", Side::Egress(0), flowing(2000));
-        tracker.observe("weave-a", Side::Egress(1), flowing(1000));
+        tracker.observe("connect-a", Side::Egress(0), flowing(1000));
+        tracker.observe("connect-a", Side::Egress(1), flowing(1000));
+        tracker.observe("connect-a", Side::Egress(0), flowing(2000));
+        tracker.observe("connect-a", Side::Egress(1), flowing(1000));
 
-        assert!(tracker.advanced("weave-a", Side::Egress(0)));
-        assert!(!tracker.advanced("weave-a", Side::Egress(1)));
+        assert!(tracker.advanced("connect-a", Side::Egress(0)));
+        assert!(!tracker.advanced("connect-a", Side::Egress(1)));
     }
 
     #[test]
@@ -950,8 +953,9 @@ mod tests {
     #[test]
     fn session_total_never_falls_when_a_session_ends() {
         let mut tracker = StallTracker::default();
-        let mut total =
-            |sessions: &[(&str, i64)]| tracker.session_total("weave-a", Side::Egress(0), sessions);
+        let mut total = |sessions: &[(&str, i64)]| {
+            tracker.session_total("connect-a", Side::Egress(0), sessions)
+        };
         assert_eq!(total(&[("old", 5000), ("new", 100)]), 5100);
         assert_eq!(total(&[("old", 5000), ("new", 600)]), 5600);
         assert_eq!(
@@ -966,7 +970,7 @@ mod tests {
     fn whip_gateway_hop() -> DesiredHop {
         DesiredHop {
             delivery: None,
-            id: "weave-alice-cam-receiver-studio".to_string(),
+            id: "connect-alice-cam-receiver-studio".to_string(),
             node_id: "strom-node-2".to_string(),
             profile_id: "whip-to-srt".to_string(),
             role: HopRole::Receiver,
@@ -974,7 +978,7 @@ mod tests {
                 SignallingTransport::Whip,
                 SocketRole::Listen,
                 "http://172.27.0.10:8080/whip",
-                "weave-alice-cam-receiver-studio",
+                "connect-alice-cam-receiver-studio",
             ),
             merge_ingress: None,
             egresses: vec![DesiredEgress {
@@ -1004,8 +1008,8 @@ mod tests {
     fn block_flow_with_matching_sockets_is_adopted() {
         let desired = vec![whip_gateway_hop()];
         let flows = vec![block_flow(
-            "weave-alice-cam-receiver-studio",
-            "weave-alice-cam-receiver-studio",
+            "connect-alice-cam-receiver-studio",
+            "connect-alice-cam-receiver-studio",
             "srt://:7003?mode=listener&latency=200",
         )];
         assert!(diff_hops(&desired, &flows).is_empty());
@@ -1016,16 +1020,16 @@ mod tests {
         let desired = vec![whip_gateway_hop()];
         for (endpoint_id, srt_uri) in [
             (
-                "weave-alice-cam-receiver-preview",
+                "connect-alice-cam-receiver-preview",
                 "srt://:7003?mode=listener&latency=200",
             ),
             (
-                "weave-alice-cam-receiver-studio",
+                "connect-alice-cam-receiver-studio",
                 "srt://:7004?mode=listener&latency=200",
             ),
         ] {
             let flows = vec![block_flow(
-                "weave-alice-cam-receiver-studio",
+                "connect-alice-cam-receiver-studio",
                 endpoint_id,
                 srt_uri,
             )];
@@ -1044,8 +1048,8 @@ mod tests {
         let mut video_only = whip_gateway_hop();
         video_only.tracks = Some(vec![Track::Video]);
         let both = block_flow(
-            "weave-alice-cam-receiver-studio",
-            "weave-alice-cam-receiver-studio",
+            "connect-alice-cam-receiver-studio",
+            "connect-alice-cam-receiver-studio",
             "srt://:7003?mode=listener&latency=200",
         );
         let plan = diff_hops(std::slice::from_ref(&video_only), &[both]);
@@ -1053,11 +1057,11 @@ mod tests {
 
         let mut built: StromFlow = serde_json::from_value(serde_json::json!({
             "id": "id-a",
-            "name": "weave-alice-cam-receiver-studio",
+            "name": "connect-alice-cam-receiver-studio",
             "running": true,
             "blocks": [
                 { "id": "whip_in", "properties": {
-                    "endpoint_id": "weave-alice-cam-receiver-studio", "mode": "video" } },
+                    "endpoint_id": "connect-alice-cam-receiver-studio", "mode": "video" } },
                 { "id": "srt_out_0", "properties": {
                     "srt_uri": "srt://:7003?mode=listener&latency=200", "num_audio_tracks": 0 } },
             ],

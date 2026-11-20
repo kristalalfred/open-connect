@@ -8,5 +8,5 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium nodejs libnss3-tools \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /node_modules /node_modules
-ENV WEAVE_BROWSER_EXECUTABLE=/usr/bin/chromium
+ENV CONNECT_BROWSER_EXECUTABLE=/usr/bin/chromium
 WORKDIR /work

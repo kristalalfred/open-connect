@@ -45,19 +45,13 @@ use axum::{
     routing::{get, post},
 };
 use clap::Parser;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
-use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
-use tower_http::cors::{AllowOrigin, CorsLayer};
-use weave_core::auth::{
+use connect_core::auth::{
     self, Guard, NodeCaller, NodeGuard, refuse_other_node, require_bearer, require_node_token,
     unauthorized,
 };
-use weave_core::logging::ErrorChain;
-use weave_core::webhook::{EventType, NodeSummary, StreamSummary, Subject};
-use weave_core::{
+use connect_core::logging::ErrorChain;
+use connect_core::webhook::{EventType, NodeSummary, StreamSummary, Subject};
+use connect_core::{
     AcceptedState, ApiError, ApiErrorCode, DesiredHop, EndpointDescriptor, Health, LocalEnd,
     NodeAccepted, NodeHeartbeat, NodeRegistration, NodeResource, NodeStatus, ObservedState,
     PROTOCOL_VERSION, PathStatus, PlanStatus, ROUTE_ENDPOINTS, ROUTE_NODE_DESIRED,
@@ -70,6 +64,12 @@ use weave_core::{
     StreamSetResource, StreamStatus, ValidationIssue, protocol_compatible, resource_id_issue,
     validate_local_io, validate_node, validate_observation, validate_resource_id, validate_stream,
 };
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
+use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use keys::{LinkKeys, SecretSource};
 use leadership::{
@@ -86,12 +86,16 @@ use store::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "weave-controller", version, about = "open-weave reconciler")]
+#[command(
+    name = "connect-controller",
+    version,
+    about = "open-connect reconciler"
+)]
 struct Args {
     #[arg(help = "Address the API listens on")]
     #[arg(
         long,
-        env = "WEAVE_CONTROLLER_ADDR",
+        env = "CONNECT_CONTROLLER_ADDR",
         hide_env_values = true,
         default_value = "127.0.0.1:8082"
     )]
@@ -99,7 +103,7 @@ struct Args {
     #[arg(help = "Address the dashboard listens on. It requires no authentication")]
     #[arg(
         long,
-        env = "WEAVE_DASHBOARD_ADDR",
+        env = "CONNECT_DASHBOARD_ADDR",
         hide_env_values = true,
         default_value = "127.0.0.1:8090"
     )]
@@ -107,7 +111,7 @@ struct Args {
     #[arg(help = "URL other controllers forward API requests to while this one leads")]
     #[arg(
         long,
-        env = "WEAVE_ADVERTISE_URL",
+        env = "CONNECT_ADVERTISE_URL",
         hide_env_values = true,
         requires = "database_url"
     )]
@@ -115,11 +119,11 @@ struct Args {
     #[arg(
         help = "Origin a browser-hosted node may call the API from, or `*` for any origin, for development. Unset sends no CORS headers"
     )]
-    #[arg(long, env = "WEAVE_CORS_ORIGIN", hide_env_values = true)]
+    #[arg(long, env = "CONNECT_CORS_ORIGIN", hide_env_values = true)]
     cors_origin: Option<String>,
     #[arg(
         long,
-        env = "WEAVE_RECONCILE_INTERVAL_SECS",
+        env = "CONNECT_RECONCILE_INTERVAL_SECS",
         hide_env_values = true,
         default_value_t = 5
     )]
@@ -127,7 +131,7 @@ struct Args {
     #[arg(help = "Seconds without a heartbeat before a node is marked offline")]
     #[arg(
         long,
-        env = "WEAVE_NODE_TTL_SECS",
+        env = "CONNECT_NODE_TTL_SECS",
         hide_env_values = true,
         default_value_t = 15
     )]
@@ -137,7 +141,7 @@ struct Args {
     )]
     #[arg(
         long,
-        env = "WEAVE_NODE_FORGET_SECS",
+        env = "CONNECT_NODE_FORGET_SECS",
         hide_env_values = true,
         default_value_t = 300
     )]
@@ -148,22 +152,22 @@ struct Args {
     #[arg(help = "Seconds before the Postgres controller lease expires without renewal")]
     #[arg(
         long,
-        env = "WEAVE_LEASE_TTL_SECS",
+        env = "CONNECT_LEASE_TTL_SECS",
         hide_env_values = true,
         default_value_t = 10,
         value_parser = clap::value_parser!(u64).range(1..)
     )]
     lease_ttl_secs: u64,
     #[arg(help = "Absolute URL that receives node and stream events. Webhooks are off when unset")]
-    #[arg(long, env = "WEAVE_WEBHOOK_URL", hide_env_values = true)]
+    #[arg(long, env = "CONNECT_WEBHOOK_URL", hide_env_values = true)]
     webhook_url: Option<String>,
     #[arg(help = "Presented to the receiver as `Authorization: Bearer <token>`")]
-    #[arg(long, env = "WEAVE_WEBHOOK_TOKEN", hide_env_values = true)]
+    #[arg(long, env = "CONNECT_WEBHOOK_TOKEN", hide_env_values = true)]
     webhook_token: Option<String>,
     #[arg(help = "Event types to deliver, comma-separated. Defaults to all of them")]
     #[arg(
         long,
-        env = "WEAVE_WEBHOOK_EVENTS",
+        env = "CONNECT_WEBHOOK_EVENTS",
         hide_env_values = true,
         value_delimiter = ','
     )]
@@ -345,14 +349,14 @@ struct NodeView {
     id: String,
     status: NodeStatus,
     endpoint: String,
-    topology: weave_core::NodeTopology,
+    topology: connect_core::NodeTopology,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_seen_secs: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
 struct StreamView {
-    format_policy: weave_core::FormatPolicy,
+    format_policy: connect_core::FormatPolicy,
     conditions: Vec<StreamCondition>,
     destinations: Vec<StreamDestinationStatus>,
     name: String,
@@ -370,13 +374,13 @@ struct HopView {
     id: String,
     node: String,
     profile_id: String,
-    role: weave_core::HopRole,
+    role: connect_core::HopRole,
     ingress: IngressView,
     #[serde(skip_serializing_if = "Option::is_none")]
     merge_ingress: Option<IngressView>,
     egresses: Vec<EgressView>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    state: Option<weave_core::HopState>,
+    state: Option<connect_core::HopState>,
 }
 
 #[derive(Debug, Serialize)]
@@ -384,13 +388,13 @@ struct IngressView {
     #[serde(flatten)]
     socket: SocketView,
     #[serde(skip_serializing_if = "Option::is_none")]
-    condition: Option<weave_core::LinkCondition>,
+    condition: Option<connect_core::LinkCondition>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stats: Option<weave_core::LinkStats>,
+    stats: Option<connect_core::LinkStats>,
 }
 
 impl IngressView {
-    fn new(socket: &weave_core::SocketSpec, status: Option<&weave_core::SocketStatus>) -> Self {
+    fn new(socket: &connect_core::SocketSpec, status: Option<&connect_core::SocketStatus>) -> Self {
         Self {
             socket: SocketView::from(socket),
             condition: status.map(|status| status.condition),
@@ -405,11 +409,11 @@ struct EgressView {
     #[serde(flatten)]
     socket: SocketView,
     #[serde(skip_serializing_if = "Option::is_none")]
-    condition: Option<weave_core::LinkCondition>,
+    condition: Option<connect_core::LinkCondition>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    resolved: Option<weave_core::ResolvedAddr>,
+    resolved: Option<connect_core::ResolvedAddr>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stats: Option<weave_core::LinkStats>,
+    stats: Option<connect_core::LinkStats>,
 }
 
 #[derive(Debug, Serialize)]
@@ -427,9 +431,9 @@ struct SocketView {
     url: Option<String>,
 }
 
-impl From<&weave_core::SocketSpec> for SocketView {
-    fn from(spec: &weave_core::SocketSpec) -> Self {
-        use weave_core::{RistSocket, SocketSpec, SrtSocket, Transport};
+impl From<&connect_core::SocketSpec> for SocketView {
+    fn from(spec: &connect_core::SocketSpec) -> Self {
+        use connect_core::{RistSocket, SocketSpec, SrtSocket, Transport};
 
         let bare = |transport, mode| Self {
             transport,
@@ -466,7 +470,7 @@ impl From<&weave_core::SocketSpec> for SocketView {
             },
             SocketSpec::Webrtc(socket) => Self {
                 id: Some(socket.attempt.link.to_string()),
-                ..bare(weave_core::WEBRTC_TRANSPORT, None)
+                ..bare(connect_core::WEBRTC_TRANSPORT, None)
             },
             SocketSpec::Local(socket) => Self {
                 id: Some(socket.id.clone()),
@@ -486,7 +490,7 @@ struct ReconcileOutcome {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    weave_core::logging::init();
+    connect_core::logging::init();
 
     let args = Args::parse();
 
@@ -643,7 +647,7 @@ fn cors_layer(origin: &str) -> Result<CorsLayer> {
     } else {
         AllowOrigin::exact(
             HeaderValue::from_str(origin)
-                .with_context(|| format!("WEAVE_CORS_ORIGIN is not a valid origin: {origin}"))?,
+                .with_context(|| format!("CONNECT_CORS_ORIGIN is not a valid origin: {origin}"))?,
         )
     };
     Ok(CorsLayer::new()
@@ -660,7 +664,7 @@ async fn tick_every(state: &AppState, interval: Duration) -> Infallible {
 }
 
 async fn shutdown() -> Result<()> {
-    weave_core::shutdown::signal()
+    connect_core::shutdown::signal()
         .await
         .context("waiting for shutdown signal")?;
     tracing::info!("controller shutting down");
@@ -1050,7 +1054,7 @@ fn named_nodes<'a>(streams: impl IntoIterator<Item = &'a StreamDefinition>) -> B
         );
         for endpoint in endpoints {
             named.extend(endpoint.node());
-            if let weave_core::StreamTransport::Srt(srt) = endpoint {
+            if let connect_core::StreamTransport::Srt(srt) = endpoint {
                 named.extend(srt.via.iter().map(String::as_str));
             }
         }
@@ -1092,7 +1096,7 @@ fn router(state: AppState, north: Guard, south: NodeGuard) -> Router {
         .route(ROUTE_NODE_HEARTBEAT, post(node_heartbeat))
         .route(ROUTE_NODE_DESIRED, get(get_desired))
         .route(
-            weave_core::ROUTE_NODE_SIGNALLING,
+            connect_core::ROUTE_NODE_SIGNALLING,
             post(exchange_descriptions),
         )
         .route(ROUTE_ENDPOINTS, get(list_endpoints))
@@ -1887,8 +1891,8 @@ async fn plan_stream(
 fn withhold_secrets(hops: &mut [DesiredHop]) {
     for socket in hops.iter_mut().flat_map(DesiredHop::sockets_mut) {
         match socket {
-            weave_core::SocketSpec::Srt(socket) => socket.params_mut().passphrase = None,
-            weave_core::SocketSpec::Webrtc(socket) => socket.turn.clear(),
+            connect_core::SocketSpec::Srt(socket) => socket.params_mut().passphrase = None,
+            connect_core::SocketSpec::Webrtc(socket) => socket.turn.clear(),
             _ => {}
         }
     }
@@ -2257,16 +2261,16 @@ async fn node_heartbeat(
 type HopReport<'a> = (
     &'a str,
     &'a str,
-    weave_core::HopState,
-    weave_core::LinkCondition,
-    Option<weave_core::LinkCondition>,
-    Vec<(&'a str, weave_core::LinkCondition)>,
+    connect_core::HopState,
+    connect_core::LinkCondition,
+    Option<connect_core::LinkCondition>,
+    Vec<(&'a str, connect_core::LinkCondition)>,
     Option<DeliveryKey>,
 );
 
 type DeliveryKey = (
-    weave_core::DeliveryState,
-    weave_core::DeliveryReason,
+    connect_core::DeliveryState,
+    connect_core::DeliveryReason,
     Option<u32>,
     bool,
     bool,
@@ -2274,9 +2278,9 @@ type DeliveryKey = (
 
 type NodeReport<'a> = (
     NodeStatus,
-    &'a [weave_core::NodeInput],
-    &'a [weave_core::NodeOutput],
-    weave_core::NodeTopology,
+    &'a [connect_core::NodeInput],
+    &'a [connect_core::NodeOutput],
+    connect_core::NodeTopology,
     Vec<HopReport<'a>>,
 );
 
@@ -2343,7 +2347,7 @@ async fn exchange_descriptions(
     State(state): State<AppState>,
     Extension(caller): Extension<NodeCaller>,
     Path(node_id): Path<String>,
-    payload: Result<Json<weave_core::SignallingExchange>, JsonRejection>,
+    payload: Result<Json<connect_core::SignallingExchange>, JsonRejection>,
 ) -> Response {
     if let Some(response) = refuse_other_node(&caller, &node_id) {
         return response;
@@ -2828,7 +2832,7 @@ fn reconcile_with_revisions(
                             };
                             let origin = path.hops.iter().find(|hop| {
                                 hop.delivery.as_ref().is_some_and(|timing| {
-                                    timing.role == weave_core::DeliveryRole::Origin
+                                    timing.role == connect_core::DeliveryRole::Origin
                                 })
                             });
                             timed::effective_report(current(receiver), origin.and_then(current))
@@ -2986,14 +2990,14 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use http_body_util::BodyExt;
-    use serde_json::{Value, json};
-    use tower::ServiceExt;
-    use weave_core::{
+    use connect_core::{
         DeclaredTopology, HopEndpointClass, HopProfile, HopStatus, NetworkAttachment,
         NetworkListeners, NodeCapabilities, NodeDescriptor, PortRange, RoleSet, SrtEndpoint,
         SrtListener, StreamDestination, StreamTransport, Transport, TransportClass,
     };
+    use http_body_util::BodyExt;
+    use serde_json::{Value, json};
+    use tower::ServiceExt;
 
     use crate::webhook::tests::{Sink, sink};
 
@@ -3032,9 +3036,9 @@ mod tests {
             ingress: srt.clone(),
             egress: srt,
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Preserve,
+            media_behavior: connect_core::MediaBehavior::Preserve,
             merge: false,
-            accepts: Some(weave_core::FormatConstraint::default()),
+            accepts: Some(connect_core::FormatConstraint::default()),
         }
     }
 
@@ -3105,7 +3109,7 @@ mod tests {
         StreamDefinition {
             name: name.to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: srt_endpoint(source, 200),
             destinations: vec![StreamDestination {
@@ -3241,12 +3245,12 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let hops: Vec<DesiredHop> = serde_json::from_value(body).unwrap();
         assert_eq!(hops.len(), 1, "sender hop placed on node 1");
-        assert_eq!(hops[0].id, "weave-basic-sender");
+        assert_eq!(hops[0].id, "connect-basic-sender");
 
         let (_, body) = desired_hops(&app, "strom-node-2").await;
         let hops: Vec<DesiredHop> = serde_json::from_value(body).unwrap();
         assert_eq!(hops.len(), 1, "receiver hop placed on node 2");
-        assert_eq!(hops[0].id, "weave-basic-receiver-studio");
+        assert_eq!(hops[0].id, "connect-basic-receiver-studio");
     }
 
     #[tokio::test]
@@ -3710,7 +3714,7 @@ mod tests {
         stream
     }
 
-    const X_CONFLICT: &str = "stream x can plan hop id weave-x-receiver-a-sender, \
+    const X_CONFLICT: &str = "stream x can plan hop id connect-x-receiver-a-sender, \
                               which stream x-receiver-a can also plan";
 
     fn assert_hop_id_conflict(body: &Value, field: &str) {
@@ -3950,7 +3954,7 @@ mod tests {
             .unwrap();
         assert_eq!(later.status, PathStatus::Pending);
         assert!(later.conditions.iter().any(|condition| condition.detail
-            == "hop id weave-x-receiver-a-sender is already planned for stream x"));
+            == "hop id connect-x-receiver-a-sender is already planned for stream x"));
     }
 
     #[tokio::test]
@@ -4030,7 +4034,7 @@ mod tests {
         {
             let mut view = state.view.write().await;
             view.streams = vec![StreamStatus {
-                format_policy: weave_core::FormatPolicy::Report,
+                format_policy: connect_core::FormatPolicy::Report,
                 name: "basic".to_string(),
                 generation: 1,
                 observed_generation: None,
@@ -4086,47 +4090,47 @@ mod tests {
             .await
             .get_mut("strom-node-1")
             .unwrap()
-            .hop_status = vec![weave_core::HopStatus {
+            .hop_status = vec![connect_core::HopStatus {
             delivery: None,
-            id: "weave-basic-sender".to_string(),
+            id: "connect-basic-sender".to_string(),
             node_id: "strom-node-1".to_string(),
             revision,
-            state: weave_core::HopState::Provisioned,
-            ingress: weave_core::SocketStatus {
+            state: connect_core::HopState::Provisioned,
+            ingress: connect_core::SocketStatus {
                 peer: None,
-                condition: weave_core::LinkCondition::Flowing,
+                condition: connect_core::LinkCondition::Flowing,
                 resolved: None,
-                stats: Some(weave_core::LinkStats {
+                stats: Some(connect_core::LinkStats {
                     rate_mbps: 3.2,
-                    ..weave_core::LinkStats::default()
+                    ..connect_core::LinkStats::default()
                 }),
             },
             merge_ingress: None,
             egresses: vec![
-                weave_core::EgressStatus {
+                connect_core::EgressStatus {
                     branch_id: "preview".to_string(),
-                    status: weave_core::SocketStatus {
+                    status: connect_core::SocketStatus {
                         peer: None,
-                        condition: weave_core::LinkCondition::Flowing,
+                        condition: connect_core::LinkCondition::Flowing,
                         resolved: None,
-                        stats: Some(weave_core::LinkStats {
+                        stats: Some(connect_core::LinkStats {
                             rate_mbps: 3.1,
-                            ..weave_core::LinkStats::default()
+                            ..connect_core::LinkStats::default()
                         }),
                     },
                 },
-                weave_core::EgressStatus {
+                connect_core::EgressStatus {
                     branch_id: "studio".to_string(),
-                    status: weave_core::SocketStatus {
+                    status: connect_core::SocketStatus {
                         peer: None,
-                        condition: weave_core::LinkCondition::Connecting,
-                        resolved: Some(weave_core::ResolvedAddr {
+                        condition: connect_core::LinkCondition::Connecting,
+                        resolved: Some(connect_core::ResolvedAddr {
                             host: "172.27.0.10".to_string(),
                             port: 7555,
                         }),
-                        stats: Some(weave_core::LinkStats {
+                        stats: Some(connect_core::LinkStats {
                             rate_mbps: 0.0,
-                            ..weave_core::LinkStats::default()
+                            ..connect_core::LinkStats::default()
                         }),
                     },
                 },
@@ -4147,7 +4151,7 @@ mod tests {
         assert_eq!(hops.len(), 3, "sender + two receivers");
 
         let sender = &hops[0];
-        assert_eq!(sender["id"], "weave-basic-sender");
+        assert_eq!(sender["id"], "connect-basic-sender");
         assert_eq!(sender["node"], "strom-node-1");
         assert_eq!(sender["state"], "provisioned");
         assert_eq!(sender["ingress"]["condition"], "flowing");
@@ -4191,9 +4195,9 @@ mod tests {
         }
         reconcile_tick(&state).await;
         let revision = state.desired.read().await["strom-node-1"].hops[0].revision();
-        let egress = |condition| weave_core::EgressStatus {
+        let egress = |condition| connect_core::EgressStatus {
             branch_id: "studio".to_string(),
-            status: weave_core::SocketStatus {
+            status: connect_core::SocketStatus {
                 peer: None,
                 condition,
                 resolved: None,
@@ -4208,27 +4212,27 @@ mod tests {
             .unwrap()
             .hop_status = vec![HopStatus {
             delivery: None,
-            id: "weave-basic-sender".to_string(),
+            id: "connect-basic-sender".to_string(),
             node_id: "strom-node-1".to_string(),
             revision,
-            state: weave_core::HopState::Provisioned,
-            ingress: weave_core::SocketStatus {
+            state: connect_core::HopState::Provisioned,
+            ingress: connect_core::SocketStatus {
                 peer: None,
-                condition: weave_core::LinkCondition::Flowing,
+                condition: connect_core::LinkCondition::Flowing,
                 resolved: None,
                 stats: None,
             },
             merge_ingress: None,
             egresses: vec![
-                egress(weave_core::LinkCondition::Connecting),
-                egress(weave_core::LinkCondition::Flowing),
+                egress(connect_core::LinkCondition::Connecting),
+                egress(connect_core::LinkCondition::Flowing),
             ],
         }];
 
         let (status, body) = send(&dashboard_router(state), "GET", "/view", None).await;
         assert_eq!(status, StatusCode::OK);
         let sender = &body["streams"][0]["hops"][0];
-        assert_eq!(sender["id"], "weave-basic-sender");
+        assert_eq!(sender["id"], "connect-basic-sender");
         assert_eq!(sender["egresses"].as_array().unwrap().len(), 1);
         assert_eq!(sender["egresses"][0]["condition"], "connecting");
     }
@@ -4344,7 +4348,7 @@ mod tests {
         let receiver = {
             let mut view = state.view.write().await;
             let receiver = &mut view.hops.get_mut("basic").unwrap()[1];
-            receiver.merge_ingress = Some(weave_core::SocketSpec::srt_listen(7100, 60));
+            receiver.merge_ingress = Some(connect_core::SocketSpec::srt_listen(7100, 60));
             receiver.clone()
         };
         let report = serde_json::from_value(json!({
@@ -4405,7 +4409,7 @@ mod tests {
             let content_type = response.headers()["content-type"].to_str().unwrap();
             assert!(content_type.starts_with("text/html"), "{content_type}");
             let bytes = response.into_body().collect().await.unwrap().to_bytes();
-            assert!(String::from_utf8_lossy(&bytes).contains("open-weave"));
+            assert!(String::from_utf8_lossy(&bytes).contains("open-connect"));
         }
     }
 
@@ -4508,7 +4512,7 @@ mod tests {
     #[test]
     fn condition_transition_time_changes_only_when_status_changes() {
         let mut previous = StreamStatus {
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             name: "basic".to_string(),
             generation: 1,
             observed_generation: Some(1),
@@ -4556,7 +4560,7 @@ mod tests {
         let StreamTransport::Srt(destination) = &mut invalid.destinations[0].endpoint else {
             unreachable!()
         };
-        destination.remote = Some(weave_core::RemoteAddr {
+        destination.remote = Some(connect_core::RemoteAddr {
             host: "example.test".to_string(),
             port: 9000,
             network: "internet".to_string(),
@@ -4681,7 +4685,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_relay_that_misses_one_desired_fetch_keeps_its_bridge() {
-        let bridge = "weave-feed-bridge-studio-0";
+        let bridge = "connect-feed-bridge-studio-0";
         let (state, _mem) = mem_state();
         let app = open_router(state.clone());
         let register = |registration: NodeRegistration| {
@@ -4710,7 +4714,7 @@ mod tests {
         assert_eq!(hops[0].id, bridge);
         register(node_registration("relay-a", "198.51.100.10")).await;
 
-        let heartbeat = |hop_status: Vec<weave_core::HopStatus>| NodeHeartbeat {
+        let heartbeat = |hop_status: Vec<connect_core::HopStatus>| NodeHeartbeat {
             inputs: Vec::new(),
             outputs: Vec::new(),
             node_id: "relay-b".to_string(),
@@ -4721,15 +4725,15 @@ mod tests {
         };
         let running = hops
             .iter()
-            .map(|hop| weave_core::HopStatus {
+            .map(|hop| connect_core::HopStatus {
                 delivery: None,
                 id: hop.id.clone(),
                 node_id: hop.node_id.clone(),
                 revision: hop.revision(),
-                state: weave_core::HopState::Provisioned,
-                ingress: weave_core::SocketStatus {
+                state: connect_core::HopState::Provisioned,
+                ingress: connect_core::SocketStatus {
                     peer: None,
-                    condition: weave_core::LinkCondition::Flowing,
+                    condition: connect_core::LinkCondition::Flowing,
                     resolved: None,
                     stats: None,
                 },
@@ -4737,11 +4741,11 @@ mod tests {
                 egresses: hop
                     .egresses
                     .iter()
-                    .map(|egress| weave_core::EgressStatus {
+                    .map(|egress| connect_core::EgressStatus {
                         branch_id: egress.branch_id.clone(),
-                        status: weave_core::SocketStatus {
+                        status: connect_core::SocketStatus {
                             peer: None,
-                            condition: weave_core::LinkCondition::Flowing,
+                            condition: connect_core::LinkCondition::Flowing,
                             resolved: None,
                             stats: None,
                         },
@@ -4774,7 +4778,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_plan_keeps_a_bridge_on_the_relay_that_reports_running_it() {
-        let bridge = "weave-feed-bridge-studio-0";
+        let bridge = "connect-feed-bridge-studio-0";
         let plan_relay = |relay_b: NodeRegistration| async move {
             let (state, _mem) = mem_state();
             let app = open_router(state);
@@ -4811,15 +4815,15 @@ mod tests {
         assert_eq!(plan_relay(idle.clone()).await.as_deref(), Some("relay-a"));
 
         let mut running = idle;
-        running.hop_status = vec![weave_core::HopStatus {
+        running.hop_status = vec![connect_core::HopStatus {
             delivery: None,
             id: bridge.to_string(),
             node_id: "relay-b".to_string(),
             revision: String::new(),
-            state: weave_core::HopState::Provisioned,
-            ingress: weave_core::SocketStatus {
+            state: connect_core::HopState::Provisioned,
+            ingress: connect_core::SocketStatus {
                 peer: None,
-                condition: weave_core::LinkCondition::Flowing,
+                condition: connect_core::LinkCondition::Flowing,
                 resolved: None,
                 stats: None,
             },
@@ -4938,24 +4942,24 @@ mod tests {
         .await;
         assert_eq!(mem.upsert_node_calls(), 1);
 
-        let socket = |condition, rate_mbps| weave_core::SocketStatus {
+        let socket = |condition, rate_mbps| connect_core::SocketStatus {
             peer: None,
             condition,
             resolved: None,
-            stats: Some(weave_core::LinkStats {
+            stats: Some(connect_core::LinkStats {
                 rate_mbps,
-                ..weave_core::LinkStats::default()
+                ..connect_core::LinkStats::default()
             }),
         };
         let hop = |condition, rate_mbps| HopStatus {
             delivery: None,
-            id: "weave-basic-sender".to_string(),
+            id: "connect-basic-sender".to_string(),
             node_id: "strom-node-1".to_string(),
             revision: String::new(),
-            state: weave_core::HopState::Provisioned,
+            state: connect_core::HopState::Provisioned,
             ingress: socket(condition, rate_mbps),
             merge_ingress: None,
-            egresses: vec![weave_core::EgressStatus {
+            egresses: vec![connect_core::EgressStatus {
                 branch_id: "studio".to_string(),
                 status: socket(condition, rate_mbps),
             }],
@@ -4976,7 +4980,7 @@ mod tests {
                 "new hop",
                 heartbeat(
                     NodeStatus::Degraded,
-                    vec![hop(weave_core::LinkCondition::Flowing, 2.5)],
+                    vec![hop(connect_core::LinkCondition::Flowing, 2.5)],
                 ),
                 3,
             ),
@@ -4984,7 +4988,7 @@ mod tests {
                 "new rate only",
                 heartbeat(
                     NodeStatus::Degraded,
-                    vec![hop(weave_core::LinkCondition::Flowing, 2.7)],
+                    vec![hop(connect_core::LinkCondition::Flowing, 2.7)],
                 ),
                 3,
             ),
@@ -4992,7 +4996,7 @@ mod tests {
                 "new condition",
                 heartbeat(
                     NodeStatus::Degraded,
-                    vec![hop(weave_core::LinkCondition::Stalled, 0.0)],
+                    vec![hop(connect_core::LinkCondition::Stalled, 0.0)],
                 ),
                 4,
             ),
@@ -5002,7 +5006,7 @@ mod tests {
                     NodeStatus::Degraded,
                     vec![HopStatus {
                         revision: "new-revision".to_string(),
-                        ..hop(weave_core::LinkCondition::Stalled, 0.0)
+                        ..hop(connect_core::LinkCondition::Stalled, 0.0)
                     }],
                 ),
                 5,
@@ -5024,13 +5028,13 @@ mod tests {
         assert_eq!(stored[0].node.status, NodeStatus::Degraded);
         assert_eq!(
             stored[0].hop_status[0].ingress.condition,
-            weave_core::LinkCondition::Stalled
+            connect_core::LinkCondition::Stalled
         );
         let (_, body) = send(&app, "GET", "/state", None).await;
         let observed: ObservedState = serde_json::from_value(body).unwrap();
         assert_eq!(
             observed.hops[0].ingress.condition,
-            weave_core::LinkCondition::Stalled
+            connect_core::LinkCondition::Stalled
         );
     }
 
@@ -5096,7 +5100,7 @@ mod tests {
             id: "capture-1".to_string(),
             label: "Capture".to_string(),
             node_id: Some("node/one".to_string()),
-            kind: weave_core::EndpointKind::Source,
+            kind: connect_core::EndpointKind::Source,
             transports: Vec::new(),
             metadata: Value::Null,
         });
@@ -5117,15 +5121,15 @@ mod tests {
     async fn node_cannot_report_another_nodes_hop_status() {
         let (state, mem) = mem_state();
         let app = open_router(state);
-        let status_for = |node_id: &str| weave_core::HopStatus {
+        let status_for = |node_id: &str| connect_core::HopStatus {
             delivery: None,
-            id: "weave-basic-sender".to_string(),
+            id: "connect-basic-sender".to_string(),
             node_id: node_id.to_string(),
             revision: String::new(),
-            state: weave_core::HopState::Provisioned,
-            ingress: weave_core::SocketStatus {
+            state: connect_core::HopState::Provisioned,
+            ingress: connect_core::SocketStatus {
                 peer: None,
-                condition: weave_core::LinkCondition::Flowing,
+                condition: connect_core::LinkCondition::Flowing,
                 resolved: None,
                 stats: None,
             },
@@ -5181,10 +5185,10 @@ mod tests {
 
         let mut browser = node_registration("browser-a1b2", "browser");
         browser.node.endpoint = "browser://browser-a1b2".to_string();
-        browser.node.inputs = vec![weave_core::NodeInput {
+        browser.node.inputs = vec![connect_core::NodeInput {
             id: "camera".to_string(),
             label: "Camera".to_string(),
-            tracks: vec![weave_core::Track::Audio, weave_core::Track::Video],
+            tracks: vec![connect_core::Track::Audio, connect_core::Track::Video],
         }];
         browser.node.capabilities.hop_profiles = vec![HopProfile {
             timed_delivery: None,
@@ -5192,10 +5196,10 @@ mod tests {
             ingress: HopEndpointClass::Local(LocalEnd::Input),
             egress: HopEndpointClass::Transport(TransportClass {
                 transport: Transport::Whip,
-                roles: RoleSet::only(weave_core::SocketRole::Connect),
+                roles: RoleSet::only(connect_core::SocketRole::Connect),
             }),
             max_egresses: Some(1),
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         }];
@@ -5215,20 +5219,21 @@ mod tests {
             id: "whip-to-srt".to_string(),
             ingress: HopEndpointClass::Transport(TransportClass {
                 transport: Transport::Whip,
-                roles: RoleSet::only(weave_core::SocketRole::Listen),
+                roles: RoleSet::only(connect_core::SocketRole::Listen),
             }),
             egress: HopEndpointClass::Transport(TransportClass {
                 transport: Transport::Srt,
                 roles: RoleSet::both(),
             }),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         });
-        strom.node.topology.attachments[0].listeners.whip = Some(weave_core::SignallingListener {
-            base_url: "http://172.27.0.10:8080/whip".to_string(),
-        });
+        strom.node.topology.attachments[0].listeners.whip =
+            Some(connect_core::SignallingListener {
+                base_url: "http://172.27.0.10:8080/whip".to_string(),
+            });
         send(
             &app,
             "POST",
@@ -5238,7 +5243,7 @@ mod tests {
         .await;
 
         let mut cam = stream("alice-cam");
-        cam.source = StreamTransport::Input(weave_core::LocalEndpoint {
+        cam.source = StreamTransport::Input(connect_core::LocalEndpoint {
             node: "browser-a1b2".to_string(),
             id: "camera".to_string(),
             network: None,
@@ -5262,11 +5267,14 @@ mod tests {
         assert_eq!(hops.len(), 1);
         assert_eq!(
             hops[0].ingress,
-            weave_core::SocketSpec::input("camera"),
+            connect_core::SocketSpec::input("camera"),
             "the page's own camera feeds the hop"
         );
         assert!(
-            matches!(hops[0].egresses[0].socket, weave_core::SocketSpec::Whip(_)),
+            matches!(
+                hops[0].egresses[0].socket,
+                connect_core::SocketSpec::Whip(_)
+            ),
             "the page pushes to the Strom's ingest: {:?}",
             hops[0].egresses[0]
         );
@@ -5335,12 +5343,12 @@ mod tests {
         assert_eq!(status, StatusCode::ACCEPTED);
 
         let mut spec = stream("music-to-speakers");
-        spec.source = StreamTransport::Input(weave_core::LocalEndpoint {
+        spec.source = StreamTransport::Input(connect_core::LocalEndpoint {
             node: "alfreds-mac".to_string(),
             id: "music".to_string(),
             network: None,
         });
-        spec.destinations[0].endpoint = StreamTransport::Output(weave_core::LocalEndpoint {
+        spec.destinations[0].endpoint = StreamTransport::Output(connect_core::LocalEndpoint {
             node: "alfreds-mac".to_string(),
             id: "speakers".to_string(),
             network: None,
@@ -5355,11 +5363,11 @@ mod tests {
         let (condition, hops) = placement(&app).await;
         assert_eq!(condition["status"], "true");
         assert_eq!(hops.len(), 2);
-        assert_eq!(hops[0].ingress, weave_core::SocketSpec::input("music"));
-        assert_eq!(hops[0].tracks, Some(vec![weave_core::Track::Audio]));
+        assert_eq!(hops[0].ingress, connect_core::SocketSpec::input("music"));
+        assert_eq!(hops[0].tracks, Some(vec![connect_core::Track::Audio]));
         assert_eq!(
             hops[1].egresses[0].socket,
-            weave_core::SocketSpec::output("speakers")
+            connect_core::SocketSpec::output("speakers")
         );
 
         assert_eq!(local_heartbeat(&app, json!([])).await, StatusCode::ACCEPTED);
@@ -5624,16 +5632,16 @@ mod tests {
         let StreamTransport::Srt(source) = &mut definition.source else {
             unreachable!()
         };
-        source.format = Some(weave_core::MediaFormat {
-            container: weave_core::Container::MpegTs,
+        source.format = Some(connect_core::MediaFormat {
+            container: connect_core::Container::MpegTs,
             video: None,
             audio: None,
         });
         let StreamTransport::Srt(destination) = &mut definition.destinations[0].endpoint else {
             unreachable!()
         };
-        destination.accepts = Some(weave_core::FormatConstraint {
-            container: Some(vec![weave_core::Container::Rtp]),
+        destination.accepts = Some(connect_core::FormatConstraint {
+            container: Some(vec![connect_core::Container::Rtp]),
             ..Default::default()
         });
         let outcome = reconcile(vec![definition], &observed, &LinkKeys::for_tests());
@@ -5857,12 +5865,12 @@ mod tests {
                 "max_egresses": 8
             })),
             "hop_status": [{
-                "id": "weave-music-sender", "node_id": "alfreds-mac", "revision": "r",
+                "id": "connect-music-sender", "node_id": "alfreds-mac", "revision": "r",
                 "state": "provisioned", "ingress": { "condition": "flowing" },
                 "egresses": [{
                     "branch_id": "filip", "condition": "unreachable",
                     "resolved": { "host": "198.51.100.4", "port": 62000 },
-                    "peer": { "link": "weave-music-receiver-filip", "generation": 1_761_300_000_u32, "relayed": true }
+                    "peer": { "link": "connect-music-receiver-filip", "generation": 1_761_300_000_u32, "relayed": true }
                 }]
             }]
         }))
@@ -5877,7 +5885,7 @@ mod tests {
                 "max_egresses": 8
             })),
             "hop_status": [{
-                "id": "weave-music-sender", "node_id": "filips-mac", "revision": "r",
+                "id": "connect-music-sender", "node_id": "filips-mac", "revision": "r",
                 "state": "provisioned", "ingress": { "condition": "flowing" },
                 "egresses": [{ "branch_id": "anna", "condition": "flowing" }]
             }]
@@ -6117,7 +6125,7 @@ mod tests {
     #[tokio::test]
     async fn a_standby_passes_credentials_and_challenges_through() {
         let (state, _mem) = mem_state();
-        let north = weave_core::auth::Token::new("north-test-token").unwrap();
+        let north = connect_core::auth::Token::new("north-test-token").unwrap();
         let leader = serve_on_loopback(api_listener(
             router(state, Guard::Required(north), NodeGuard::Disabled),
             None,
@@ -6302,9 +6310,9 @@ mod tests {
     }
 
     fn flowing_reports(hops: &[DesiredHop]) -> Vec<HopStatus> {
-        let flowing = || weave_core::SocketStatus {
+        let flowing = || connect_core::SocketStatus {
             peer: None,
-            condition: weave_core::LinkCondition::Flowing,
+            condition: connect_core::LinkCondition::Flowing,
             resolved: None,
             stats: None,
         };
@@ -6314,13 +6322,13 @@ mod tests {
                 id: hop.id.clone(),
                 node_id: hop.node_id.clone(),
                 revision: hop.revision(),
-                state: weave_core::HopState::Provisioned,
+                state: connect_core::HopState::Provisioned,
                 ingress: flowing(),
                 merge_ingress: hop.merge_ingress.as_ref().map(|_| flowing()),
                 egresses: hop
                     .egresses
                     .iter()
-                    .map(|egress| weave_core::EgressStatus {
+                    .map(|egress| connect_core::EgressStatus {
                         branch_id: egress.branch_id.clone(),
                         status: flowing(),
                     })
@@ -7146,7 +7154,7 @@ mod tests {
 
     fn observed_status(conditions: Vec<StreamCondition>) -> StreamStatus {
         StreamStatus {
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             name: "basic".to_string(),
             generation: 1,
             observed_generation: Some(1),
@@ -7355,10 +7363,10 @@ mod tests {
                         id: hop.id.clone(),
                         node_id: hop.node_id.clone(),
                         revision: hop.revision(),
-                        state: weave_core::HopState::Provisioned,
-                        ingress: weave_core::SocketStatus {
+                        state: connect_core::HopState::Provisioned,
+                        ingress: connect_core::SocketStatus {
                             peer: None,
-                            condition: weave_core::LinkCondition::Connecting,
+                            condition: connect_core::LinkCondition::Connecting,
                             resolved: None,
                             stats: None,
                         },
@@ -7366,11 +7374,11 @@ mod tests {
                         egresses: hop
                             .egresses
                             .iter()
-                            .map(|egress| weave_core::EgressStatus {
+                            .map(|egress| connect_core::EgressStatus {
                                 branch_id: egress.branch_id.clone(),
-                                status: weave_core::SocketStatus {
+                                status: connect_core::SocketStatus {
                                     peer: None,
-                                    condition: weave_core::LinkCondition::Connecting,
+                                    condition: connect_core::LinkCondition::Connecting,
                                     resolved: None,
                                     stats: None,
                                 },
@@ -7463,7 +7471,7 @@ mod tests {
             paths: 1,
             endpoint: StreamTransport::Srt(SrtEndpoint {
                 node: None,
-                remote: Some(weave_core::RemoteAddr {
+                remote: Some(connect_core::RemoteAddr {
                     host: "203.0.113.7".to_string(),
                     port: 9000,
                     network: "internet".to_string(),
@@ -7491,11 +7499,11 @@ mod tests {
         );
     }
 
-    fn event_types(events: &[weave_core::webhook::Event]) -> Vec<EventType> {
+    fn event_types(events: &[connect_core::webhook::Event]) -> Vec<EventType> {
         events.iter().map(|event| event.event_type).collect()
     }
 
-    async fn deliveries(sink: &mut Sink) -> Vec<weave_core::webhook::Event> {
+    async fn deliveries(sink: &mut Sink) -> Vec<connect_core::webhook::Event> {
         let mut events = Vec::new();
         while let Ok(delivery) = tokio::time::timeout(Duration::from_millis(300), sink.next()).await
         {
@@ -7694,10 +7702,10 @@ mod node_auth_tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
+    use connect_core::auth::{MinEpochs, NodeKey, Token};
     use http_body_util::BodyExt;
     use serde_json::{Value, json};
     use tower::ServiceExt;
-    use weave_core::auth::{MinEpochs, NodeKey, Token};
 
     use super::tests::{NORTH_ROUTES, SHARED_READ_ROUTES, SOUTH_ROUTES};
 
@@ -8218,14 +8226,14 @@ mod key_exposure_tests {
     use crate::webhook::tests::sink;
     use axum::body::Body;
     use axum::http::Request;
-    use http_body_util::BodyExt;
-    use serde_json::Value;
-    use tower::ServiceExt;
-    use weave_core::{
+    use connect_core::{
         DeclaredTopology, HopEndpointClass, HopProfile, NetworkAttachment, NetworkListeners,
         NodeCapabilities, NodeDescriptor, Passphrase, PortRange, RoleSet, SocketSpec, SrtEndpoint,
         SrtListener, StreamDestination, StreamTransport, Transport, TransportClass,
     };
+    use http_body_util::BodyExt;
+    use serde_json::Value;
+    use tower::ServiceExt;
 
     const PRODUCER_KEY: &str = "producer-passphrase-1";
     const CONSUMER_KEY: &str = "consumer-passphrase-1";
@@ -8263,7 +8271,7 @@ mod key_exposure_tests {
             ingress: srt(),
             egress: srt(),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge,
             accepts: None,
         };
@@ -8308,7 +8316,7 @@ mod key_exposure_tests {
         StreamDefinition {
             name: "feed".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: endpoint("node-a", PRODUCER_KEY),
             destinations: vec![StreamDestination {
@@ -8509,7 +8517,7 @@ mod args_tests {
     #[test]
     fn an_advertised_url_needs_a_database_and_an_http_url() {
         let parse = |args: &[&str]| {
-            Args::try_parse_from(std::iter::once("weave-controller").chain(args.iter().copied()))
+            Args::try_parse_from(std::iter::once("connect-controller").chain(args.iter().copied()))
         };
         assert!(parse(&["--advertise-url", "http://controller-1:8082"]).is_err());
         for unusable in [
@@ -8520,7 +8528,7 @@ mod args_tests {
             assert!(
                 parse(&[
                     "--database-url",
-                    "postgres://db/weave",
+                    "postgres://db/connect",
                     "--advertise-url",
                     unusable
                 ])
@@ -8530,7 +8538,7 @@ mod args_tests {
         }
         let args = parse(&[
             "--database-url",
-            "postgres://db/weave",
+            "postgres://db/connect",
             "--advertise-url",
             "http://controller-1:8082/",
         ])

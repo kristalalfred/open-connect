@@ -11,13 +11,13 @@ http://localhost:8000/#southbound=http://localhost:8082&token=<node-token>
 ```
 
 Camera capture requires HTTPS or a localhost secure context. Cross-origin
-requests require `WEAVE_CORS_ORIGIN` on the controllers to allow the page's
+requests require `CONNECT_CORS_ORIGIN` on the controllers to allow the page's
 origin. See [Security](../../docs/security.md#browser-nodes) for tokens and CORS.
 
 | Fragment option | Meaning |
 |---|---|
 | `southbound` | Southbound API base URL: a controller, or a load balancer in front of the controllers. |
-| `token` | Node token, created with `weave node-token ID`. |
+| `token` | Node token, created with `connect node-token ID`. |
 | `node` | Explicit node ID; must match the token if one is supplied. |
 | `network` | Routing domain; defaults to `internet`. |
 | `media=video` | Capture video without audio. Default captures both. |
@@ -36,7 +36,7 @@ From this directory:
 ```sh
 pnpm install
 pnpm exec playwright install --no-shell chromium
-node check.mjs --southbound http://127.0.0.1:8082 --token "$(weave node-token browser-1)" --serve 8000
+node check.mjs --southbound http://127.0.0.1:8082 --token "$(connect node-token browser-1)" --serve 8000
 ```
 
 The check launches Chromium with fake devices and waits for this page's accepted
@@ -48,9 +48,9 @@ registration and its appearance in `/nodes`.
 | `--page URL` | Open another page URL. |
 | `--stay` | Keep the browser running after registration. |
 | `--headed` | Show the browser window. |
-| `--video-only` | Capture video only; also `WEAVE_BROWSER_MEDIA=video`. |
+| `--video-only` | Capture video only; also `CONNECT_BROWSER_MEDIA=video`. |
 | `--node ID`, `--ice JSON` | Set the corresponding fragment option. |
-| `--executable PATH` | Use another Chromium binary; also `WEAVE_BROWSER_EXECUTABLE`. |
+| `--executable PATH` | Use another Chromium binary; also `CONNECT_BROWSER_EXECUTABLE`. |
 
 With a private CA, Node.js polling needs `NODE_EXTRA_CA_CERTS` and Chromium
 needs the CA in its trust store. The [bench](../../bench/README.md) configures both.

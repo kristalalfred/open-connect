@@ -18,17 +18,17 @@ destinations:
 
 [`examples/stream.yaml`](../examples/stream.yaml) is a complete example, and
 [`contracts/json-schema/`](../contracts/json-schema/) has every field. Names and
-ids follow the [identifier rule](api.md#identifiers). `weave apply -f` stores a
-stream, and `weave plan -f` previews its placement without storing it.
+ids follow the [identifier rule](api.md#identifiers). `connect apply -f` stores a
+stream, and `connect plan -f` previews its placement without storing it.
 
 ## Endpoints
 
 | Endpoint | Used as | Meaning |
 |---|---|---|
-| `srt: { node }` | source, destination | A producer or consumer outside open-weave dials an SRT listener on `node`. |
-| `srt: { remote: { host, port, network } }` | destination | The stream dials an SRT listener outside open-weave. No node hosts it. |
-| `whip: { node }` | source | A WHIP sender outside open-weave, such as an encoder, publishes to `node`. |
-| `whep: { node }` | destination | A WHEP player outside open-weave plays from `node`. |
+| `srt: { node }` | source, destination | A producer or consumer outside open-connect dials an SRT listener on `node`. |
+| `srt: { remote: { host, port, network } }` | destination | The stream dials an SRT listener outside open-connect. No node hosts it. |
+| `whip: { node }` | source | A WHIP sender outside open-connect, such as an encoder, publishes to `node`. |
+| `whep: { node }` | destination | A WHEP player outside open-connect plays from `node`. |
 | `input: { node, id }` | source | One of the node's own [inputs](nodes.md#inputs-and-outputs), such as a camera or an application's audio. |
 | `output: { node, id }` | destination | One of the node's own [outputs](nodes.md#inputs-and-outputs), such as a video element or speakers. |
 
@@ -49,7 +49,7 @@ destinations:
   - id: filip
     output: { node: filips-mac, id: macbook-pro-speakers }
 ```
-`GET /streams/{name}/endpoints` (`weave get endpoints NAME`) reports the address
+`GET /streams/{name}/endpoints` (`connect get endpoints NAME`) reports the address
 or URL each peer dials.
 
 ### WHIP and WHEP peers
@@ -58,8 +58,8 @@ A `whip` source puts the stream's sender hop on its node, with the ingress at
 that node's `whip` base URL. A `whep` destination puts the receiver hop on its
 node, with the last egress at the `whep` base URL. The URLs end in the hop id:
 
-- `{base}/weave-{stream}-sender`
-- `{base}/weave-{stream}-receiver-{destination}`
+- `{base}/connect-{stream}-sender`
+- `{base}/connect-{stream}-receiver-{destination}`
 
 A node that declares no base URL for the transport cannot take the peer, and the
 stream stays unplaced. On Strom the sender runs `whip-to-srt` and the receiver
@@ -119,7 +119,7 @@ room. When none has, the second path moves, or the
 destination drops to one path, rather than the stream going unplaced.
 
 The second path's branch id is `{destination}.2` and its bridges are
-`weave-{stream}-bridge-{destination}.2-{position}`. Destination ids cannot
+`connect-{stream}-bridge-{destination}.2-{position}`. Destination ids cannot
 contain `.`, so these never equal another destination's ids. Adding a second
 path changes none of the first path's hop ids, ports or branch ids. The
 destination's status covers both paths, so one path down reads `degraded`.
@@ -129,7 +129,7 @@ destination's status covers both paths, so one path down reads `degraded`.
 SRT links between nodes are always encrypted with keys the controller derives
 (see [Security](security.md#srt-encryption)). RIST links are not (see
 [Cleartext links](#cleartext-links)). A socket that something outside
-open-weave dials, or that dials out to it, takes its key from `passphrase` on
+open-connect dials, or that dials out to it, takes its key from `passphrase` on
 the `srt` endpoint: the source ingress a producer dials, the output a consumer
 dials, or a `remote` listener.
 
@@ -194,7 +194,7 @@ destinations:
         audio: { sample_rate: [44100] }
 ```
 
-A source declares the prepared feed after any processing outside open-weave.
+A source declares the prepared feed after any processing outside open-connect.
 A present `format` fixes the container and tracks. Omitted tracks are absent;
 an absent `format` is unknown. A destination's omitted `accepts` is unknown,
 while `accepts: {}` explicitly imposes no modeled restrictions. Supplied

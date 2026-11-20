@@ -4,17 +4,17 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use http_body_util::BodyExt;
-use serde::Serialize;
-use tower::ServiceExt;
-use weave_core::auth::{Guard, NodeGuard};
-use weave_core::{
+use connect_core::auth::{Guard, NodeGuard};
+use connect_core::{
     DeclaredTopology, DesiredHop, EgressStatus, HopEndpointClass, HopProfile, HopRole, HopState,
     HopStatus, LinkCondition, NetworkAttachment, NetworkListeners, NodeCapabilities,
     NodeDescriptor, NodeHeartbeat, NodeRegistration, NodeStatus, PROTOCOL_VERSION, PortRange,
     RoleSet, SocketStatus, SrtEndpoint, SrtListener, StreamConditionStatus, StreamConditionType,
     StreamDefinition, StreamDestination, StreamTransport, Transport, TransportClass,
 };
+use http_body_util::BodyExt;
+use serde::Serialize;
+use tower::ServiceExt;
 
 use crate::keys::LinkKeys;
 use crate::path::{PortAllocator, derive_path};
@@ -67,7 +67,7 @@ fn registration(id: &str, attachments: Vec<NetworkAttachment>) -> NodeRegistrati
                     ingress: srt(),
                     egress: srt(),
                     max_egresses: None,
-                    media_behavior: weave_core::MediaBehavior::Unknown,
+                    media_behavior: connect_core::MediaBehavior::Unknown,
                     merge: false,
                     accepts: None,
                 }],
@@ -118,7 +118,7 @@ fn fan_out_stream(receivers: usize) -> StreamDefinition {
     StreamDefinition {
         name: "feed".to_string(),
         enabled: true,
-        format_policy: weave_core::FormatPolicy::Report,
+        format_policy: connect_core::FormatPolicy::Report,
         allow_cleartext_links: false,
         source: endpoint("source"),
         destinations: (0..receivers)
@@ -247,13 +247,13 @@ async fn relayed_fan_out_to_three_hundred_nodes() {
 }
 
 #[tokio::test]
-#[ignore = "about a second in debug; run with `cargo test -p weave-controller thousand -- --ignored --nocapture --test-threads=1`"]
+#[ignore = "about a second in debug; run with `cargo test -p connect-controller thousand -- --ignored --nocapture --test-threads=1`"]
 async fn direct_fan_out_to_a_thousand_nodes() {
     fan_out("direct", direct_nodes(1000), 1000).await;
 }
 
 #[tokio::test]
-#[ignore = "about a second in debug; run with `cargo test -p weave-controller thousand -- --ignored --nocapture --test-threads=1`"]
+#[ignore = "about a second in debug; run with `cargo test -p connect-controller thousand -- --ignored --nocapture --test-threads=1`"]
 async fn relayed_fan_out_to_a_thousand_nodes() {
     let state = fan_out("relayed", relayed_nodes(1000), 1000).await;
 
@@ -276,7 +276,7 @@ fn one_destination_stream(name: &str) -> StreamDefinition {
     StreamDefinition {
         name: name.to_string(),
         enabled: true,
-        format_policy: weave_core::FormatPolicy::Report,
+        format_policy: connect_core::FormatPolicy::Report,
         allow_cleartext_links: false,
         source: endpoint("source"),
         destinations: vec![StreamDestination {
@@ -398,7 +398,7 @@ async fn time_the_view_with_reports(count: usize) {
 }
 
 #[tokio::test]
-#[ignore = "timing; run with `cargo test -p weave-controller view_with_reports -- --ignored --nocapture --test-threads=1`"]
+#[ignore = "timing; run with `cargo test -p connect-controller view_with_reports -- --ignored --nocapture --test-threads=1`"]
 async fn the_view_with_reports_at_one_and_two_thousand_streams() {
     time_the_view_with_reports(1000).await;
     time_the_view_with_reports(2000).await;
@@ -423,7 +423,7 @@ async fn time_the_view_of_a_fan_out(receivers: usize) {
 }
 
 #[tokio::test]
-#[ignore = "timing; run with `cargo test -p weave-controller view_of_a_fan_out -- --ignored --nocapture --test-threads=1`"]
+#[ignore = "timing; run with `cargo test -p connect-controller view_of_a_fan_out -- --ignored --nocapture --test-threads=1`"]
 async fn the_view_of_a_fan_out_to_one_and_two_thousand_receivers() {
     time_the_view_of_a_fan_out(1000).await;
     time_the_view_of_a_fan_out(2000).await;

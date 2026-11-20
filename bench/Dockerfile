@@ -9,7 +9,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     find crates examples -type f -exec touch {} + && \
     cargo build --bins && \
     mkdir -p /out && \
-    for b in weave weave-controller weave-adapter-strom weave-node; do \
+    for b in connect connect-controller connect-adapter-strom connect-node; do \
         cp "target/debug/$b" /out/; \
     done
 
@@ -17,6 +17,6 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl && \
     rm -rf /var/lib/apt/lists/* && \
-    useradd --system --create-home --uid 10001 weave
+    useradd --system --create-home --uid 10001 connect
 COPY --from=builder /out/ /usr/local/bin/
-USER weave
+USER connect

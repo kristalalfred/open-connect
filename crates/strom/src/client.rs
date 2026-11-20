@@ -1,10 +1,10 @@
 use std::time::Duration;
 
+use connect_core::auth::Token;
+use connect_core::logging::{ErrorChain, excerpt};
 use reqwest::{Method, RequestBuilder, Response, StatusCode};
 use serde::Deserialize;
 use serde_json::Value;
-use weave_core::auth::Token;
-use weave_core::logging::{ErrorChain, excerpt};
 
 use crate::flow::{FlowListResponse, StromFlow};
 use crate::spec::{FlowSpec, MappingError};

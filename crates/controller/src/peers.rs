@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use weave_core::{
+use connect_core::{
     DesiredHop, HopStatus, LinkCondition, LinkDescription, NodeDescriptor, NodeStatus, PeerAttempt,
     PeerLinkId, PeerRole, SITE_NETWORK_PREFIX, SessionDescription, SignallingReply,
 };
@@ -574,7 +574,7 @@ mod tests {
 
     use super::*;
 
-    const LINK: &str = "weave-music-receiver-filip";
+    const LINK: &str = "connect-music-receiver-filip";
 
     fn node(id: &str, status: &str) -> NodeDescriptor {
         serde_json::from_value(json!({
@@ -594,7 +594,7 @@ mod tests {
         egress["branch_id"] = json!("filip");
         serde_json::from_value(json!([
             {
-                "id": "weave-music-sender", "node_id": "alfreds-mac", "profile_id": "app-audio-out",
+                "id": "connect-music-sender", "node_id": "alfreds-mac", "profile_id": "app-audio-out",
                 "role": "sender", "ingress": { "transport": "input", "id": "music" },
                 "egresses": [egress]
             },
@@ -609,7 +609,7 @@ mod tests {
 
     fn report(condition: &str) -> Vec<HopStatus> {
         serde_json::from_value(json!([{
-            "id": "weave-music-sender", "node_id": "alfreds-mac", "revision": "r",
+            "id": "connect-music-sender", "node_id": "alfreds-mac", "revision": "r",
             "state": "provisioned", "ingress": { "condition": "flowing" },
             "egresses": [{
                 "branch_id": "filip", "condition": condition,

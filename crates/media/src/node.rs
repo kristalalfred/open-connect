@@ -5,16 +5,16 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::{Json, Router, routing::get};
-use reqwest::{Client, RequestBuilder};
-use serde::Deserialize;
-use serde_json::json;
-use weave_core::auth::Token;
-use weave_core::{
+use connect_core::auth::Token;
+use connect_core::{
     DeliveryCapability, DeliveryRole, DesiredHop, FormatConstraint, HopEndpointClass, HopProfile,
     HopStatus, LocalEnd, MediaBehavior, NodeCapabilities, NodeConfig, NodeDescriptor,
     NodeHeartbeat, NodeRegistration, NodeStatus, PROTOCOL_VERSION, RoleSet, Transport,
     TransportClass,
 };
+use reqwest::{Client, RequestBuilder};
+use serde::Deserialize;
+use serde_json::json;
 
 use crate::clock::{Clock, ClockConfig};
 use crate::merge::BufferLimits;
@@ -112,7 +112,7 @@ pub fn profiles(clock_domain: &str, epoch: u64, scheduling_error_bound_us: u32) 
             merge,
             accepts: Some(FormatConstraint::default()),
             timed_delivery: Some(DeliveryCapability {
-                protocol: weave_core::delivery::TIMED_PROTOCOL.into(),
+                protocol: connect_core::delivery::TIMED_PROTOCOL.into(),
                 roles: vec![role],
                 max_latency_ms: 60_000,
                 scheduling_error_bound_us,
@@ -357,7 +357,7 @@ pub async fn run(config: Config) -> Result<()> {
     };
     let result = tokio::select! {
         result = operation => result,
-        result = weave_core::shutdown::signal() => result.context("waiting for native node shutdown"),
+        result = connect_core::shutdown::signal() => result.context("waiting for native node shutdown"),
     };
     refresh.abort();
     health.abort();

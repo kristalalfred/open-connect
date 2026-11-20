@@ -1,4 +1,4 @@
-name: open-weave-node
+name: open-connect-node
 
 services:
   strom:
@@ -19,15 +19,15 @@ services:
       start_period: 20s
 
   adapter:
-    image: ${WEAVE_IMAGE:-ghcr.io/kristalalfred/open-weave:latest}
+    image: ${CONNECT_IMAGE:-ghcr.io/kristalalfred/open-connect:latest}
     restart: unless-stopped
     network_mode: host
-    command: ["weave-adapter-strom", "--config", "/etc/weave/node.yaml"]
+    command: ["connect-adapter-strom", "--config", "/etc/connect/node.yaml"]
     environment:
-      WEAVE_SOUTHBOUND_TOKEN: ${WEAVE_SOUTHBOUND_TOKEN:?set WEAVE_SOUTHBOUND_TOKEN}
-      WEAVE_STROM_TOKEN: ${STROM_API_KEY:?set STROM_API_KEY}
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_SOUTHBOUND_TOKEN:?set CONNECT_SOUTHBOUND_TOKEN}
+      CONNECT_STROM_TOKEN: ${STROM_API_KEY:?set STROM_API_KEY}
     volumes:
-      - ./node.yaml:/etc/weave/node.yaml:ro
+      - ./node.yaml:/etc/connect/node.yaml:ro
     depends_on:
       strom:
         condition: service_healthy

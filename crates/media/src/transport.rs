@@ -3,14 +3,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use connect_core::{
+    DeliveryReason, HopState, LinkCondition, LinkStats, ResolvedAddr, SocketStatus,
+    SrtSocket as SocketSpec,
+};
 use futures::{FutureExt, StreamExt};
 use srt_tokio::SrtSocket;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use weave_core::{
-    DeliveryReason, HopState, LinkCondition, LinkStats, ResolvedAddr, SocketStatus,
-    SrtSocket as SocketSpec,
-};
 
 use crate::clock::Clock;
 use crate::merge::ClockSample;
@@ -155,7 +155,7 @@ impl SocketTask {
                                 stats.last_progress_ns = Some(now);
                             }
                             let maximum = if configuration.params().payload
-                                == weave_core::PayloadKind::WeaveTimedV1
+                                == connect_core::PayloadKind::ConnectTimedV1
                             {
                                 crate::record::MAX_MESSAGE
                             } else {

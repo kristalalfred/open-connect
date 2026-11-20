@@ -4,12 +4,12 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use connect_core::auth::{Guard, NodeGuard, NodeKey, Token};
+use connect_core::webhook::Subject;
+use connect_core::{NodeRegistration, PROTOCOL_VERSION};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
-use weave_core::auth::{Guard, NodeGuard, NodeKey, Token};
-use weave_core::webhook::Subject;
-use weave_core::{NodeRegistration, PROTOCOL_VERSION};
 
 use crate::keys::LinkKeys;
 use crate::store::{MemStore, StateStore};
@@ -498,7 +498,7 @@ fn strom_relay() -> Value {
 
 fn bench_lan_relay() -> Value {
     forwarding_node(
-        "weave-relay",
+        "connect-relay",
         json!({
             "id": "lan",
             "network": "bench-lan",
@@ -579,7 +579,7 @@ async fn sites_that_dial_no_relay_network_are_not_bridged_through_a_relay() {
     let (_state, app) = music_to_filip(HOME, None, [strom_relay(), bench_lan_relay()]).await;
 
     assert_unplaced(&app).await;
-    assert_eq!(desired(&app, "weave-relay").await, json!([]));
+    assert_eq!(desired(&app, "connect-relay").await, json!([]));
 }
 
 #[tokio::test]
@@ -589,7 +589,7 @@ async fn sites_that_dial_a_relay_network_are_bridged_through_its_listener() {
 
     let placement = placement(&app).await;
     assert_eq!(placement["status"], "true", "{placement}");
-    let bridges = desired(&app, "weave-relay").await;
+    let bridges = desired(&app, "connect-relay").await;
     assert_eq!(bridges.as_array().unwrap().len(), 1, "{bridges}");
     let bridge = &bridges[0];
     assert_eq!(bridge["role"], "bridge", "{bridge}");
@@ -639,7 +639,7 @@ async fn sites_behind_one_public_address_are_linked_directly() {
             desired(&app, "filips-mac").await[0]["egresses"][0]["transport"],
             "output"
         );
-        for relay in ["weave-relay", "strom-node-1"] {
+        for relay in ["connect-relay", "strom-node-1"] {
             assert_eq!(
                 desired(&app, relay).await,
                 json!([]),

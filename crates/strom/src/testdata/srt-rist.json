@@ -73,5 +73,5 @@
       "to": "ristsink_0:sink"
     }
   ],
-  "name": "weave-feed-sender"
+  "name": "connect-feed-sender"
 }

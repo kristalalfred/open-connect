@@ -2,28 +2,28 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
+use connect_core::auth::{self, MIN_NODE_KEY_LEN, NodeKey, NodeKeyError, Token};
+use connect_core::{
+    StreamConditionStatus, StreamDefinition, StreamSetApply, read, validate_resource_id,
+};
 use reqwest::RequestBuilder;
 use reqwest::header::{ETAG, HeaderValue, IF_MATCH, IF_NONE_MATCH};
 use serde::de::DeserializeOwned;
-use weave_core::auth::{self, MIN_NODE_KEY_LEN, NodeKey, NodeKeyError, Token};
-use weave_core::{
-    StreamConditionStatus, StreamDefinition, StreamSetApply, read, validate_resource_id,
-};
 
 #[derive(Parser)]
-#[command(name = "weave", version, about = "open-weave control plane CLI")]
+#[command(name = "connect", version, about = "open-connect control plane CLI")]
 struct Cli {
     #[arg(help = "Northbound API base URL")]
     #[arg(
         long,
-        env = "WEAVE_NORTHBOUND_URL",
+        env = "CONNECT_NORTHBOUND_URL",
         hide_env_values = true,
         default_value = "http://127.0.0.1:8082",
         global = true
     )]
     url: String,
     #[arg(
-        help = "Bearer token presented to the northbound API. Required unless the server runs with WEAVE_AUTH_DISABLED=1"
+        help = "Bearer token presented to the northbound API. Required unless the server runs with CONNECT_AUTH_DISABLED=1"
     )]
     #[arg(
         long,
@@ -79,13 +79,13 @@ enum Command {
         resource: DeleteResource,
     },
     #[command(
-        about = "Print a node's southbound token, derived from the southbound key in `WEAVE_SOUTHBOUND_KEY`. Calls no service"
+        about = "Print a node's southbound token, derived from the southbound key in `CONNECT_SOUTHBOUND_KEY`. Calls no service"
     )]
     NodeToken {
         #[arg(help = "Node id the token authenticates as")]
         id: String,
         #[arg(
-            help = "Token epoch. Raising the node's minimum in `WEAVE_SOUTHBOUND_MIN_EPOCHS` past an epoch revokes its tokens"
+            help = "Token epoch. Raising the node's minimum in `CONNECT_SOUTHBOUND_MIN_EPOCHS` past an epoch revokes its tokens"
         )]
         #[arg(long, default_value_t = 0)]
         epoch: u64,
@@ -200,9 +200,9 @@ fn authorized(request: RequestBuilder, token: Option<&Token>) -> RequestBuilder 
 
 fn unauthorized_hint(token: Option<&Token>) -> &'static str {
     if token.is_none() {
-        "\nno token was sent: pass --token or set WEAVE_NORTHBOUND_TOKEN"
+        "\nno token was sent: pass --token or set CONNECT_NORTHBOUND_TOKEN"
     } else {
-        "\nthe token sent was rejected: check it matches the server's WEAVE_NORTHBOUND_TOKEN"
+        "\nthe token sent was rejected: check it matches the server's CONNECT_NORTHBOUND_TOKEN"
     }
 }
 
@@ -412,7 +412,7 @@ fn format_result(conditions: &[read::StreamCondition]) -> String {
     conditions
         .iter()
         .find(|condition| {
-            condition.condition_type == weave_core::StreamConditionType::FormatCompatible
+            condition.condition_type == connect_core::StreamConditionType::FormatCompatible
         })
         .map_or_else(
             || "-".to_string(),
@@ -1059,13 +1059,13 @@ mod tests {
     use axum::extract::State;
     use axum::http::{Request, StatusCode};
     use axum::response::{IntoResponse, Response};
-    use serde_json::Value;
-    use std::sync::{Arc, Mutex};
-    use weave_core::{
+    use connect_core::{
         ApiError, ApiErrorCode, SrtEndpoint, StreamAccepted, StreamDestination, StreamPlan,
         StreamResource, StreamSetAccepted, StreamSetAction, StreamSetMemberResult,
         StreamSetResource, StreamTransport, validate_stream,
     };
+    use serde_json::Value;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn node_token_is_the_node_id_its_epoch_and_their_mac() {
@@ -1090,10 +1090,10 @@ mod tests {
     fn node_token_takes_no_key_on_its_command_line() {
         let key = "bench-southbound-key-for-local-use-only";
         assert!(
-            Cli::try_parse_from(["weave", "node-token", "strom-node-1", "--key", key]).is_err()
+            Cli::try_parse_from(["connect", "node-token", "strom-node-1", "--key", key]).is_err()
         );
         assert!(
-            Cli::try_parse_from(["weave", "node-token", "strom-node-1", "--epoch", "2"]).is_ok()
+            Cli::try_parse_from(["connect", "node-token", "strom-node-1", "--epoch", "2"]).is_ok()
         );
     }
 
@@ -1241,16 +1241,19 @@ destinations:
     #[test]
     fn parses_read_commands_and_output_formats() {
         let cases = [
-            (vec!["weave", "get", "nodes"], "nodes"),
-            (vec!["weave", "get", "inputs"], "inputs"),
-            (vec!["weave", "get", "outputs"], "outputs"),
-            (vec!["weave", "get", "status"], "status"),
+            (vec!["connect", "get", "nodes"], "nodes"),
+            (vec!["connect", "get", "inputs"], "inputs"),
+            (vec!["connect", "get", "outputs"], "outputs"),
+            (vec!["connect", "get", "status"], "status"),
             (
-                vec!["weave", "get", "endpoints", "cam1-to-studio"],
+                vec!["connect", "get", "endpoints", "cam1-to-studio"],
                 "endpoints",
             ),
-            (vec!["weave", "get", "stream-sets"], "stream-sets"),
-            (vec!["weave", "get", "stream-set", "studio-a"], "stream-set"),
+            (vec!["connect", "get", "stream-sets"], "stream-sets"),
+            (
+                vec!["connect", "get", "stream-set", "studio-a"],
+                "stream-set",
+            ),
         ];
 
         for (args, expected) in cases {
@@ -1272,17 +1275,17 @@ destinations:
             assert_eq!(actual, expected);
         }
 
-        let cli = Cli::try_parse_from(["weave", "-o", "yaml", "get", "streams"]).unwrap();
+        let cli = Cli::try_parse_from(["connect", "-o", "yaml", "get", "streams"]).unwrap();
         assert_eq!(cli.output, OutputFormat::Yaml);
-        let cli = Cli::try_parse_from(["weave", "get", "streams", "--output", "json"]).unwrap();
+        let cli = Cli::try_parse_from(["connect", "get", "streams", "--output", "json"]).unwrap();
         assert_eq!(cli.output, OutputFormat::Json);
-        assert!(Cli::try_parse_from(["weave", "nodes"]).is_err());
+        assert!(Cli::try_parse_from(["connect", "nodes"]).is_err());
     }
 
     #[test]
     fn parses_apply_set_command_and_strict_yaml() {
         let cli = Cli::try_parse_from([
-            "weave",
+            "connect",
             "apply-set",
             "studio-a",
             "-f",
@@ -1336,7 +1339,7 @@ streams:
             generation,
             owner: owner.map(str::to_string),
             spec: read::StreamSpec {
-                format_policy: read::Open::Known(weave_core::FormatPolicy::Report),
+                format_policy: read::Open::Known(connect_core::FormatPolicy::Report),
                 name: "cam1-to-studio".to_string(),
                 enabled: true,
             },
@@ -1739,7 +1742,7 @@ destinations:
         StreamDefinition {
             name: "cam1-to-studio".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: StreamTransport::Srt(SrtEndpoint {
                 node: Some("strom-node-1".to_string()),
@@ -1842,7 +1845,7 @@ destinations:
                 return (
                     state.mutation_status,
                     axum::Json(StreamAccepted {
-                        status: weave_core::AcceptedState::Accepted,
+                        status: connect_core::AcceptedState::Accepted,
                         name: "cam1-to-studio".to_string(),
                         generation: state
                             .resource
@@ -1947,7 +1950,7 @@ destinations:
                 return (
                     state.mutation_status,
                     axum::Json(StreamSetAccepted {
-                        status: weave_core::AcceptedState::Accepted,
+                        status: connect_core::AcceptedState::Accepted,
                         owner: "studio-a".to_string(),
                         changed: true,
                         streams: vec![StreamSetMemberResult {
@@ -2008,11 +2011,11 @@ destinations:
                 stream.name
             ));
             axum::Json(StreamPlan {
-                format_policy: weave_core::FormatPolicy::Report,
+                format_policy: connect_core::FormatPolicy::Report,
                 conditions: vec![],
                 destinations: vec![],
                 name: stream.name,
-                status: weave_core::PlanStatus::Unplaced,
+                status: connect_core::PlanStatus::Unplaced,
                 nodes: Vec::new(),
                 hops: Vec::new(),
                 endpoints: None,
@@ -2398,7 +2401,7 @@ destinations:
         let stream = StreamDefinition {
             name: "preview".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: StreamTransport::Srt(SrtEndpoint {
                 node: Some("missing".to_string()),

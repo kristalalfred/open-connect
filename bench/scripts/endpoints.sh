@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-api="${WEAVE_NORTHBOUND_URL:-http://localhost:29080}"
+api="${CONNECT_NORTHBOUND_URL:-http://localhost:29080}"
 interval=2
 attempts=30
 
 auth=()
-if [ -n "${WEAVE_NORTHBOUND_TOKEN:-}" ]; then
-  auth=(-H "Authorization: Bearer ${WEAVE_NORTHBOUND_TOKEN}")
+if [ -n "${CONNECT_NORTHBOUND_TOKEN:-}" ]; then
+  auth=(-H "Authorization: Bearer ${CONNECT_NORTHBOUND_TOKEN}")
 fi
 
 usage() {
@@ -42,10 +42,10 @@ for _ in $(seq 1 "$attempts"); do
   json="${body%$'\n'*}"
   if [ "$code" = "401" ]; then
     echo "the API rejected the bearer token (401) for $url" >&2
-    if [ -n "${WEAVE_NORTHBOUND_TOKEN:-}" ]; then
-      echo "WEAVE_NORTHBOUND_TOKEN does not match the controllers'" >&2
+    if [ -n "${CONNECT_NORTHBOUND_TOKEN:-}" ]; then
+      echo "CONNECT_NORTHBOUND_TOKEN does not match the controllers'" >&2
     else
-      echo "WEAVE_NORTHBOUND_TOKEN is unset" >&2
+      echo "CONNECT_NORTHBOUND_TOKEN is unset" >&2
     fi
     exit 1
   fi

@@ -1,4 +1,4 @@
-use weave_core::{
+use connect_core::{
     DesiredHop, EgressStatus, HopEndpointClass, HopProfile, HopState, HopStatus, LinkCondition,
     NetworkAttachment, NetworkListeners, NodeCapabilities, NodeDescriptor, NodeStatus,
     NodeTopology, ObservedState, Passphrase, PathStatus, PortRange, RoleSet, SocketRole,
@@ -26,7 +26,7 @@ fn profile(id: &str, ingress: Transport, merge: bool) -> HopProfile {
         ingress: class(ingress, RoleSet::both()),
         egress: class(Transport::Srt, RoleSet::both()),
         max_egresses: None,
-        media_behavior: weave_core::MediaBehavior::Unknown,
+        media_behavior: connect_core::MediaBehavior::Unknown,
         merge,
         accepts: None,
     }
@@ -112,7 +112,7 @@ fn stream(name: &str, destinations: Vec<StreamDestination>) -> StreamDefinition 
     StreamDefinition {
         name: name.to_string(),
         enabled: true,
-        format_policy: weave_core::FormatPolicy::Report,
+        format_policy: connect_core::FormatPolicy::Report,
         allow_cleartext_links: false,
         source: endpoint("source"),
         destinations,
@@ -190,7 +190,7 @@ fn two_paths_over_two_networks_share_no_attachment_at_either_end() {
     let planned = plan(&definition, &dual_homed());
     assert!(planned.single_path.is_empty());
 
-    let sender = hop(&planned, "weave-feed-sender");
+    let sender = hop(&planned, "connect-feed-sender");
     let branches: Vec<_> = sender
         .egresses
         .iter()
@@ -198,7 +198,7 @@ fn two_paths_over_two_networks_share_no_attachment_at_either_end() {
         .collect();
     assert_eq!(branches, [("studio", "10.0.0.2"), ("studio.2", "10.1.0.2")]);
 
-    let receiver = hop(&planned, "weave-feed-receiver-studio");
+    let receiver = hop(&planned, "connect-feed-receiver-studio");
     assert_eq!(receiver.profile_id, "srt-merge");
     let (
         SocketSpec::Srt(SrtSocket::Listen { port: first, .. }),
@@ -215,7 +215,9 @@ fn two_paths_over_two_networks_share_no_attachment_at_either_end() {
     assert_eq!(port, second);
     assert_eq!(
         params.passphrase,
-        Some(LinkKeys::for_tests().link("weave-feed-receiver-studio.2", ["source", "studio-node"]))
+        Some(
+            LinkKeys::for_tests().link("connect-feed-receiver-studio.2", ["source", "studio-node"])
+        )
     );
     assert_eq!(planned.path.hops.len(), 2);
 }
@@ -227,13 +229,13 @@ fn a_nat_pair_gets_its_second_path_through_a_second_relay() {
     assert!(planned.single_path.is_empty());
 
     assert_eq!(
-        hop(&planned, "weave-feed-bridge-studio-0").node_id,
+        hop(&planned, "connect-feed-bridge-studio-0").node_id,
         "relay-a"
     );
-    let second = hop(&planned, "weave-feed-bridge-studio.2-0");
+    let second = hop(&planned, "connect-feed-bridge-studio.2-0");
     assert_eq!(second.node_id, "relay-b");
     assert_eq!(second.egresses[0].branch_id, "studio.2");
-    let receiver = hop(&planned, "weave-feed-receiver-studio");
+    let receiver = hop(&planned, "connect-feed-receiver-studio");
     assert_eq!(
         connect_host(receiver.merge_ingress.as_ref().unwrap()),
         "10.1.0.2"
@@ -263,7 +265,7 @@ fn a_shared_uplink_or_a_single_relay_leaves_one_path() {
         }]
     );
     assert!(
-        hop(&planned, "weave-feed-receiver-studio")
+        hop(&planned, "connect-feed-receiver-studio")
             .merge_ingress
             .is_none()
     );
@@ -327,12 +329,12 @@ fn a_second_path_is_refused_where_the_link_would_be_webrtc() {
             },
         }]
     );
-    let sender = hop(&planned, "weave-feed-sender");
+    let sender = hop(&planned, "connect-feed-sender");
     assert!(
         matches!(sender.egresses.as_slice(), [egress] if matches!(egress.socket, SocketSpec::Webrtc(_)))
     );
     assert!(
-        hop(&planned, "weave-feed-receiver-studio")
+        hop(&planned, "connect-feed-receiver-studio")
             .merge_ingress
             .is_none()
     );
@@ -504,7 +506,7 @@ fn a_destination_with_one_path_of_two_says_so_in_its_placement_condition() {
         &LinkKeys::for_tests(),
     );
     let status = &outcome.streams[0];
-    let placement = |conditions: &[weave_core::StreamCondition]| {
+    let placement = |conditions: &[connect_core::StreamCondition]| {
         conditions
             .iter()
             .find(|condition| condition.condition_type == StreamConditionType::PlacementReady)
@@ -545,10 +547,10 @@ async fn a_plan_with_one_path_of_two_gives_the_reason() {
 
     use axum::Json;
     use axum::extract::State;
-    use http_body_util::BodyExt;
-    use weave_core::{
+    use connect_core::{
         DeclaredTopology, NodeRegistration, PROTOCOL_VERSION, PlanStatus, StreamPlan,
     };
+    use http_body_util::BodyExt;
 
     use crate::store::MemStore;
     use crate::{AppState, plan_stream};
@@ -614,7 +616,7 @@ fn two_streams_that_spell_one_merge_link_id_never_both_carry_its_key() {
     let merge_key = |definition: &StreamDefinition| {
         let planned = plan(definition, &nodes);
         assert!(planned.single_path.is_empty());
-        let receiver = hop(&planned, "weave-x-receiver-a-receiver-b");
+        let receiver = hop(&planned, "connect-x-receiver-a-receiver-b");
         let merge = receiver.merge_ingress.clone().expect("a merge ingress");
         link_keys(&DesiredHop {
             egresses: Vec::new(),
@@ -630,7 +632,7 @@ fn two_streams_that_spell_one_merge_link_id_never_both_carry_its_key() {
     );
     assert_eq!(
         shared_hop_id(&first, &second).as_deref(),
-        Some("weave-x-receiver-a-receiver-b"),
+        Some("connect-x-receiver-a-receiver-b"),
         "the apply check refuses the pair by its receivers"
     );
 

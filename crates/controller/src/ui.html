@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>open-weave</title>
+<title>open-connect</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -158,7 +158,7 @@
 <body>
 <main>
   <header>
-    <h1>open-weave</h1>
+    <h1>open-connect</h1>
     <span class="pill" id="report-pill"><span class="dot"></span><span id="report-status">starting</span></span>
     <span class="summary" id="report-summary"></span>
     <span class="poll" id="poll">…</span>
@@ -251,7 +251,7 @@ function rate(hop) {
 
 function hopChip(hop, showIngress = true) {
   const short = hop.merge_ingress ? "merge" : hop.role === "receiver"
-    ? hop.id.replace(/^weave-.*-receiver-/, "receiver-")
+    ? hop.id.replace(/^connect-.*-receiver-/, "receiver-")
     : hop.role;
   const reported = hop.state != null;
   const chip = h("span", "chip hop" + (reported ? "" : " unreported"),

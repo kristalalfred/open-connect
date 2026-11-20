@@ -645,7 +645,7 @@
                         "type": "string",
                         "enum": [
                           "raw",
-                          "weave_timed_v1"
+                          "connect_timed_v1"
                         ]
                       },
                       {
@@ -827,7 +827,7 @@
                         "type": "string",
                         "enum": [
                           "raw",
-                          "weave_timed_v1"
+                          "connect_timed_v1"
                         ]
                       },
                       {
@@ -1011,7 +1011,7 @@
                           "type": "string",
                           "enum": [
                             "raw",
-                            "weave_timed_v1"
+                            "connect_timed_v1"
                           ]
                         },
                         {

@@ -1,12 +1,12 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
+use connect_core::auth::Token;
+use connect_core::logging::ErrorChain;
+use connect_core::webhook::{Event, EventType, Subject};
 use reqwest::{Client, StatusCode};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
-use weave_core::auth::Token;
-use weave_core::logging::ErrorChain;
-use weave_core::webhook::{Event, EventType, Subject};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -258,8 +258,8 @@ pub(crate) mod tests {
     use axum::http::{HeaderMap, StatusCode, header::AUTHORIZATION};
     use axum::routing::post;
     use axum::{Json, Router};
-    use weave_core::webhook::{NodeSummary, StreamSummary};
-    use weave_core::{NodeCapabilities, NodeStatus, PathStatus};
+    use connect_core::webhook::{NodeSummary, StreamSummary};
+    use connect_core::{NodeCapabilities, NodeStatus, PathStatus};
 
     pub(crate) struct Delivery {
         auth: Option<String>,
@@ -350,7 +350,7 @@ pub(crate) mod tests {
             status: NodeStatus::Ready,
             endpoint: format!("http://{id}:8080"),
             capabilities: NodeCapabilities::default(),
-            topology: weave_core::NodeTopology::default(),
+            topology: connect_core::NodeTopology::default(),
         }
     }
 
@@ -513,7 +513,7 @@ pub(crate) mod tests {
         emitter.emit(
             EventType::StreamChanged,
             StreamSummary {
-                format_policy: weave_core::FormatPolicy::Report,
+                format_policy: connect_core::FormatPolicy::Report,
                 name: "basic".to_string(),
                 generation: 1,
                 observed_generation: Some(1),

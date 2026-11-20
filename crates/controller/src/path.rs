@@ -2,7 +2,7 @@ use std::borrow::{Borrow, Cow};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use weave_core::{
+use connect_core::{
     DesiredEgress, DesiredHop, DestinationEndpoint, EndpointAddr, HOP_ID_PREFIX, HopConditions,
     HopEndpointClass, HopRole, HopState, HopStatus, LinkCondition, LocalEnd, LocalEndpoint,
     LocalSocket, NetworkAttachment, NodeDescriptor, NodeStatus, Passphrase, Path, PathStatus,
@@ -821,11 +821,11 @@ pub fn derive_stream(
     committed_ports: &mut PortAllocator,
     keys: &LinkKeys,
 ) -> Result<PlannedStream, PlacementError> {
-    if stream.format_policy == weave_core::FormatPolicy::Strict {
+    if stream.format_policy == connect_core::FormatPolicy::Strict {
         let mut eligible = nodes.to_vec();
         for node in &mut eligible {
             node.capabilities.hop_profiles.retain(|profile| {
-                profile.media_behavior == weave_core::MediaBehavior::Preserve
+                profile.media_behavior == connect_core::MediaBehavior::Preserve
                     && stream.source.format().is_some_and(|format| {
                         profile
                             .accepts
@@ -838,7 +838,7 @@ pub fn derive_stream(
         if let Ok(planned) = derive_transports(stream, &eligible, peers, &mut candidate_ports, keys)
         {
             let compatibility = crate::compatibility::evaluate(stream, Some(&planned.path), nodes);
-            if compatibility.aggregate().status == weave_core::StreamConditionStatus::True {
+            if compatibility.aggregate().status == connect_core::StreamConditionStatus::True {
                 *committed_ports = candidate_ports;
                 return Ok(planned);
             }
@@ -884,7 +884,7 @@ fn is_rist(class: &HopEndpointClass) -> bool {
     match class {
         HopEndpointClass::Transport(class) => class.transport == Transport::Rist,
         HopEndpointClass::AnyOf(classes) => classes.iter().any(|class| {
-            matches!(class, weave_core::LinkClass::Transport(class) if class.transport == Transport::Rist)
+            matches!(class, connect_core::LinkClass::Transport(class) if class.transport == Transport::Rist)
         }),
         HopEndpointClass::Webrtc(_) | HopEndpointClass::Local(_) => false,
     }
@@ -1135,7 +1135,7 @@ fn derive_on(
                         delivery: destination.delivery.as_ref().and(timing.as_ref()).map(
                             |origin| {
                                 let mut receiver = origin.clone();
-                                receiver.role = weave_core::DeliveryRole::Receiver;
+                                receiver.role = connect_core::DeliveryRole::Receiver;
                                 receiver.policy.clone_from(&destination.delivery);
                                 receiver.paths = destination.paths;
                                 receiver
@@ -1159,7 +1159,7 @@ fn derive_on(
             {
                 crate::timed::set_payload(
                     &mut egress.socket,
-                    weave_core::PayloadKind::WeaveTimedV1,
+                    connect_core::PayloadKind::ConnectTimedV1,
                 );
             }
         }
@@ -1340,7 +1340,7 @@ fn carries_destination(branch_id: &str, destination: &str) -> bool {
 }
 
 struct FirstPath {
-    delivery: Option<weave_core::TimedHop>,
+    delivery: Option<connect_core::TimedHop>,
     destination: String,
     latency: u32,
     sender_attachments: Vec<String>,
@@ -1362,11 +1362,11 @@ fn place_second_path(
 ) -> Result<(), PlacementError> {
     let eligible;
     let nodes = if let Some(origin) = &first.delivery {
-        let destination = weave_core::StreamDestination {
+        let destination = connect_core::StreamDestination {
             id: first.destination.clone(),
             paths: 2,
             delivery: origin.policy.clone(),
-            endpoint: weave_core::StreamTransport::Srt(weave_core::SrtEndpoint {
+            endpoint: connect_core::StreamTransport::Srt(connect_core::SrtEndpoint {
                 node: Some(first.receiver.node_id.clone()),
                 remote: None,
                 via: vec![],
@@ -1512,7 +1512,10 @@ fn place_second_path(
     let mut sender_hop = hops[0].clone();
     if first.delivery.is_some() {
         for egress in &mut sender_egresses {
-            crate::timed::set_payload(&mut egress.socket, weave_core::PayloadKind::WeaveTimedV1);
+            crate::timed::set_payload(
+                &mut egress.socket,
+                connect_core::PayloadKind::ConnectTimedV1,
+            );
         }
     }
     sender_hop.egresses.extend(sender_egresses);
@@ -1520,7 +1523,7 @@ fn place_second_path(
     receiver_hop.merge_ingress = Some(link.downstream);
     if let Some(timing) = &first.delivery {
         if let Some(socket) = &mut receiver_hop.merge_ingress {
-            crate::timed::set_payload(socket, weave_core::PayloadKind::WeaveTimedV1);
+            crate::timed::set_payload(socket, connect_core::PayloadKind::ConnectTimedV1);
         }
         for hop in &mut new_hops {
             crate::timed::decorate(hop, timing, None);
@@ -2432,7 +2435,7 @@ fn rist_sockets(
 
 fn srt_params(latency: u32, passphrase: Option<Passphrase>) -> SrtParams {
     SrtParams {
-        payload: weave_core::PayloadKind::Raw,
+        payload: connect_core::PayloadKind::Raw,
         latency: Some(latency),
         pbkeylen: passphrase.is_some().then_some(SRT_PBKEYLEN),
         passphrase,
@@ -2897,7 +2900,7 @@ fn listener_port(spec: &SocketSpec, hop_id: &str) -> Result<u16, PlacementError>
 #[cfg(test)]
 mod contract_tests {
     use super::*;
-    use weave_core::{
+    use connect_core::{
         EgressStatus, HopEndpointClass, HopProfile, HopState, LinkCondition, NetworkListeners,
         NodeCapabilities, NodeInput, NodeTopology, SignallingListener, SocketStatus, SrtEndpoint,
         SrtListener, StreamDestination, TransportClass,
@@ -2907,7 +2910,7 @@ mod contract_tests {
         LinkKeys::for_tests()
     }
 
-    fn class(transport: Transport, roles: weave_core::RoleSet) -> HopEndpointClass {
+    fn class(transport: Transport, roles: connect_core::RoleSet) -> HopEndpointClass {
         HopEndpointClass::Transport(TransportClass { transport, roles })
     }
 
@@ -2915,10 +2918,10 @@ mod contract_tests {
         HopProfile {
             timed_delivery: None,
             id: id.to_string(),
-            ingress: class(Transport::Srt, weave_core::RoleSet::both()),
-            egress: class(Transport::Srt, weave_core::RoleSet::both()),
+            ingress: class(Transport::Srt, connect_core::RoleSet::both()),
+            egress: class(Transport::Srt, connect_core::RoleSet::both()),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         }
@@ -2984,7 +2987,7 @@ mod contract_tests {
         StreamDefinition {
             name: "feed".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: srt_endpoint("source"),
             destinations,
@@ -3025,12 +3028,12 @@ mod contract_tests {
         assert!(
             left.hops
                 .iter()
-                .any(|hop| hop.id == "weave-feed-receiver-studio")
+                .any(|hop| hop.id == "connect-feed-receiver-studio")
         );
         assert!(
             left.hops
                 .iter()
-                .any(|hop| hop.id == "weave-feed-receiver-preview")
+                .any(|hop| hop.id == "connect-feed-receiver-preview")
         );
     }
 
@@ -3087,10 +3090,10 @@ mod contract_tests {
                     ingress: HopEndpointClass::Local(LocalEnd::Input),
                     egress: class(
                         Transport::Whip,
-                        weave_core::RoleSet::only(SocketRole::Connect),
+                        connect_core::RoleSet::only(SocketRole::Connect),
                     ),
                     max_egresses: Some(1),
-                    media_behavior: weave_core::MediaBehavior::Unknown,
+                    media_behavior: connect_core::MediaBehavior::Unknown,
                     merge: false,
                     accepts: None,
                 }],
@@ -3111,18 +3114,18 @@ mod contract_tests {
             id: "whip-to-srt".to_string(),
             ingress: class(
                 Transport::Whip,
-                weave_core::RoleSet::only(SocketRole::Listen),
+                connect_core::RoleSet::only(SocketRole::Listen),
             ),
-            egress: class(Transport::Srt, weave_core::RoleSet::both()),
+            egress: class(Transport::Srt, connect_core::RoleSet::both()),
             max_egresses: None,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         });
         let stream = StreamDefinition {
             name: "camera".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: StreamTransport::Input(LocalEndpoint {
                 node: "browser".to_string(),
@@ -3174,16 +3177,16 @@ mod contract_tests {
             timed_delivery: None,
             id: "capture-to-srt".to_string(),
             ingress: HopEndpointClass::Local(LocalEnd::Input),
-            egress: class(Transport::Srt, weave_core::RoleSet::both()),
+            egress: class(Transport::Srt, connect_core::RoleSet::both()),
             max_egresses: Some(1),
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         }];
         let definition = StreamDefinition {
             name: "fanout".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: StreamTransport::Input(LocalEndpoint {
                 node: "browser".to_string(),
@@ -3208,13 +3211,13 @@ mod contract_tests {
         nodes[0].capabilities.hop_profiles = vec![HopProfile {
             timed_delivery: None,
             id: "srt-to-whep".to_string(),
-            ingress: class(Transport::Srt, weave_core::RoleSet::both()),
+            ingress: class(Transport::Srt, connect_core::RoleSet::both()),
             egress: class(
                 Transport::Whep,
-                weave_core::RoleSet::only(SocketRole::Listen),
+                connect_core::RoleSet::only(SocketRole::Listen),
             ),
             max_egresses: Some(1),
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         }];
@@ -3374,10 +3377,10 @@ mod contract_tests {
             destination("studio", "studio-node"),
         ]);
         let path = plan(&definition, &shared_nodes());
-        let sender = hop(&path, "weave-feed-sender");
+        let sender = hop(&path, "connect-feed-sender");
         let mut link_keys = Vec::new();
         for branch in ["preview", "studio"] {
-            let receiver = hop(&path, &format!("weave-feed-receiver-{branch}"));
+            let receiver = hop(&path, &format!("connect-feed-receiver-{branch}"));
             let key = link_key(egress(sender, branch)).expect("link is keyed");
             assert_eq!(link_key(&receiver.ingress), Some(key));
             assert_eq!(
@@ -3411,7 +3414,7 @@ mod contract_tests {
             ]),
             &shared_nodes(),
         );
-        let receiver = "weave-feed-receiver-studio";
+        let receiver = "connect-feed-receiver-studio";
         assert_eq!(
             link_key(&hop(&one, receiver).ingress),
             link_key(&hop(&two, receiver).ingress)
@@ -3429,7 +3432,7 @@ mod contract_tests {
         ];
         let reversed = plan(&definition, &nodes);
 
-        let receiver = "weave-feed-receiver-studio";
+        let receiver = "connect-feed-receiver-studio";
         assert!(matches!(
             hop(&reversed, receiver).ingress,
             SocketSpec::Srt(SrtSocket::Connect { .. })
@@ -3439,7 +3442,7 @@ mod contract_tests {
             link_key(&hop(&forward, receiver).ingress)
         );
         assert_eq!(
-            link_key(egress(hop(&reversed, "weave-feed-sender"), "studio")),
+            link_key(egress(hop(&reversed, "connect-feed-sender"), "studio")),
             link_key(&hop(&forward, receiver).ingress)
         );
     }
@@ -3462,8 +3465,8 @@ mod contract_tests {
             plan(&definition, &nodes)
         };
         let (a, b) = (via("relay-a"), via("relay-b"));
-        let bridge = "weave-feed-bridge-studio-0";
-        let receiver = "weave-feed-receiver-studio";
+        let bridge = "connect-feed-bridge-studio-0";
+        let receiver = "connect-feed-receiver-studio";
         assert_eq!(hop(&a, bridge).node_id, "relay-a");
         assert_eq!(hop(&b, bridge).node_id, "relay-b");
         assert_ne!(
@@ -3477,7 +3480,7 @@ mod contract_tests {
             "the link out of the relay"
         );
         assert_eq!(
-            link_key(egress(hop(&b, "weave-feed-sender"), "studio")),
+            link_key(egress(hop(&b, "connect-feed-sender"), "studio")),
             link_key(&hop(&b, bridge).ingress)
         );
         assert_eq!(
@@ -3506,7 +3509,7 @@ mod contract_tests {
         let path = plan(&definition, &shared_nodes());
         assert_eq!(link_key(&path.hops[0].ingress), None);
         assert_eq!(srt_params(&path.hops[0].ingress).pbkeylen, None);
-        let receiver = hop(&path, "weave-feed-receiver-studio");
+        let receiver = hop(&path, "connect-feed-receiver-studio");
         assert_eq!(link_key(egress(receiver, "studio")), None);
 
         keyed(&mut definition.source, "producer-passphrase");
@@ -3534,14 +3537,14 @@ mod contract_tests {
             }),
         });
         let path = plan(&definition, &shared_nodes());
-        let sender = hop(&path, "weave-feed-sender");
+        let sender = hop(&path, "connect-feed-sender");
         assert_eq!(link_key(&sender.ingress), Some("producer-passphrase"));
         assert_eq!(srt_params(&sender.ingress).pbkeylen, Some(32));
         assert_eq!(
             link_key(egress(sender, "uplink")),
             Some("remote-passphrase")
         );
-        let receiver = hop(&path, "weave-feed-receiver-studio");
+        let receiver = hop(&path, "connect-feed-receiver-studio");
         assert_eq!(
             link_key(egress(receiver, "studio")),
             Some("consumer-passphrase")
@@ -3631,7 +3634,7 @@ mod contract_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use weave_core::{
+    use connect_core::{
         EgressStatus, HopEndpointClass, HopProfile, HopState, LinkCondition, NetworkListeners,
         NodeCapabilities, NodeInput, NodeOutput, NodeTopology, ResolvedAddr, RoleSet,
         SignallingListener, SignallingTransport, SocketStatus, SrtEndpoint, SrtListener,
@@ -3674,7 +3677,7 @@ mod tests {
             ingress,
             egress,
             max_egresses,
-            media_behavior: weave_core::MediaBehavior::Unknown,
+            media_behavior: connect_core::MediaBehavior::Unknown,
             merge: false,
             accepts: None,
         }
@@ -3811,7 +3814,7 @@ mod tests {
         StreamDefinition {
             name: "contribution".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: StreamTransport::Srt(node_ref("strom-node-1", 200)),
             destinations: vec![dest("studio", node_ref("strom-node-2", 1000))],
@@ -3986,20 +3989,20 @@ mod tests {
         let node = node("n", "10.0.0.1");
         let wan = &node.topology.attachments[0];
         let a = PortAllocator::new()
-            .claim(&node, wan, "weave-x")
+            .claim(&node, wan, "connect-x")
             .expect("claim");
         let b = PortAllocator::new()
-            .claim(&node, wan, "weave-x")
+            .claim(&node, wan, "connect-x")
             .expect("claim");
         assert_eq!(a, b, "same key alone maps to the same port");
         assert!((7000..=7999).contains(&a));
 
         let mut ports = PortAllocator::new();
         let x = ports
-            .claim(&node, wan, "weave-contribution-receiver-0")
+            .claim(&node, wan, "connect-contribution-receiver-0")
             .unwrap();
         let y = ports
-            .claim(&node, wan, "weave-contribution-receiver-1")
+            .claim(&node, wan, "connect-contribution-receiver-1")
             .unwrap();
         assert_ne!(x, y, "distinct keys claim distinct ports");
 
@@ -4022,7 +4025,7 @@ mod tests {
         let mut seen: HashMap<u32, String> = HashMap::new();
         let mut collision = None;
         for i in 0..1000 {
-            let key = format!("weave-collide-{i}");
+            let key = format!("connect-collide-{i}");
             let offset = preferred_offset(range, &key);
             if let Some(prev) = seen.get(&offset) {
                 collision = Some((prev.clone(), key));
@@ -4167,10 +4170,10 @@ mod tests {
         let a = derive(&contribution(), &nodes()).expect("derive");
         let b = derive(&contribution(), &nodes()).expect("derive");
         assert_eq!(a.hops[0].id, b.hops[0].id);
-        assert_eq!(a.hops[0].id, "weave-contribution-sender");
-        assert_eq!(a.hops[1].id, "weave-contribution-receiver-studio");
-        assert!(weave_core::is_managed_hop_id(&a.hops[0].id));
-        assert!(weave_core::is_managed_hop_id(&a.hops[1].id));
+        assert_eq!(a.hops[0].id, "connect-contribution-sender");
+        assert_eq!(a.hops[1].id, "connect-contribution-receiver-studio");
+        assert!(connect_core::is_managed_hop_id(&a.hops[0].id));
+        assert!(connect_core::is_managed_hop_id(&a.hops[1].id));
     }
 
     #[test]
@@ -4280,7 +4283,7 @@ mod tests {
         assert_eq!(path.hops.len(), 3);
 
         let sender = &path.hops[0];
-        assert_eq!(sender.id, "weave-fanout-sender");
+        assert_eq!(sender.id, "connect-fanout-sender");
         assert_eq!(sender.role, HopRole::Sender);
         assert_eq!(sender.node_id, "strom-node-1");
         assert_eq!(sender.egresses.len(), 2, "one egress per destination");
@@ -4290,13 +4293,13 @@ mod tests {
         assert_eq!(host(&sender.egresses[1]), Some("172.26.0.10"));
 
         let studio = &path.hops[1];
-        assert_eq!(studio.id, "weave-fanout-receiver-studio");
+        assert_eq!(studio.id, "connect-fanout-receiver-studio");
         assert_eq!(studio.role, HopRole::Receiver);
         assert_eq!(studio.node_id, "strom-node-2");
         assert_eq!(studio.egresses[0].branch_id, "studio");
 
         let venue = &path.hops[2];
-        assert_eq!(venue.id, "weave-fanout-receiver-venue");
+        assert_eq!(venue.id, "connect-fanout-receiver-venue");
         assert_eq!(venue.role, HopRole::Receiver);
         assert_eq!(
             venue.node_id, "strom-node-1",
@@ -4437,7 +4440,7 @@ mod tests {
 
         assert_eq!(bridge.role, HopRole::Bridge);
         assert_eq!(bridge.node_id, "edge-relay");
-        assert_eq!(bridge.id, "weave-contribution-bridge-studio-0");
+        assert_eq!(bridge.id, "connect-contribution-bridge-studio-0");
 
         assert_eq!(
             srt(&sender.egresses[0]).role(),
@@ -4598,9 +4601,9 @@ mod tests {
         assert_eq!(
             bridges,
             [
-                ("weave-contribution-bridge-a-0", "relay-a"),
-                ("weave-contribution-bridge-b-0", "relay-a"),
-                ("weave-contribution-bridge-c-0", "relay-b"),
+                ("connect-contribution-bridge-a-0", "relay-a"),
+                ("connect-contribution-bridge-b-0", "relay-a"),
+                ("connect-contribution-bridge-c-0", "relay-b"),
             ]
         );
         assert_eq!(derive(&stream, &nodes), Ok(path), "stable across ticks");
@@ -4702,7 +4705,7 @@ mod tests {
         let stream = StreamDefinition {
             name: "nat-transit".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: StreamTransport::Srt(node_ref("strom-node-3", 200)),
             destinations: vec![dest("output", node_ref("strom-node-4", 1000))],
@@ -4754,8 +4757,8 @@ mod tests {
         assert_eq!(path.hops[1].node_id, "relay-first");
         assert_eq!(path.hops[2].node_id, "relay-second");
         assert_eq!(path.hops[3].node_id, "strom-node-2");
-        assert_eq!(path.hops[1].id, "weave-contribution-bridge-studio-0");
-        assert_eq!(path.hops[2].id, "weave-contribution-bridge-studio-1");
+        assert_eq!(path.hops[1].id, "connect-contribution-bridge-studio-0");
+        assert_eq!(path.hops[2].id, "connect-contribution-bridge-studio-1");
         assert_eq!(
             host(&path.hops[1].egresses[0]),
             Some("198.51.100.20"),
@@ -4832,10 +4835,10 @@ mod tests {
         assert_eq!(
             placed,
             vec![
-                ("weave-fanout-sender", "strom-node-1"),
-                ("weave-fanout-receiver-studio", "strom-node-2"),
-                ("weave-fanout-bridge-truck-0", "edge-relay"),
-                ("weave-fanout-receiver-truck", "nat-node"),
+                ("connect-fanout-sender", "strom-node-1"),
+                ("connect-fanout-receiver-studio", "strom-node-2"),
+                ("connect-fanout-bridge-truck-0", "edge-relay"),
+                ("connect-fanout-receiver-truck", "nat-node"),
             ]
         );
         assert_eq!(
@@ -4876,7 +4879,7 @@ mod tests {
         let a = derive(&stream, &nodes).expect("derive");
         let b = derive(&stream, &nodes).expect("derive");
         assert_eq!(a, b);
-        assert!(weave_core::is_managed_hop_id(&a.hops[1].id));
+        assert!(connect_core::is_managed_hop_id(&a.hops[1].id));
     }
 
     #[test]
@@ -5059,10 +5062,10 @@ mod tests {
             assert_eq!(form.shared_id(&HopIdForm::Exact(id.clone())), Some(id));
         }
         for id in [
-            "weave-x-bridge-a-",
-            "weave-x-bridge-a-01",
-            "weave-x-bridge-a-+1",
-            "weave-x-bridge-a-1-0",
+            "connect-x-bridge-a-",
+            "connect-x-bridge-a-01",
+            "connect-x-bridge-a-+1",
+            "connect-x-bridge-a-1-0",
         ] {
             assert_eq!(
                 form.shared_id(&HopIdForm::Exact(id.to_string())),
@@ -5259,7 +5262,7 @@ mod tests {
         StreamDefinition {
             name: "alice-cam".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: input_ref("browser-a1b2", "camera"),
             destinations: vec![dest("studio", node_ref("strom-node-2", 1000))],
@@ -5270,7 +5273,7 @@ mod tests {
         StreamDefinition {
             name: "alice-return".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: StreamTransport::Srt(node_ref("strom-node-2", 200)),
             destinations: vec![output_dest("guest", "browser-a1b2", "player")],
@@ -5292,7 +5295,7 @@ mod tests {
             SignallingTransport::Whip,
             SocketRole::Listen,
             "http://172.27.0.10:8080/ingest",
-            "weave-alice-cam-receiver-studio",
+            "connect-alice-cam-receiver-studio",
         );
 
         let sender = &path.hops[0];
@@ -5310,7 +5313,7 @@ mod tests {
                 SignallingTransport::Whip,
                 SocketRole::Connect,
                 "http://172.27.0.10:8080/ingest",
-                "weave-alice-cam-receiver-studio",
+                "connect-alice-cam-receiver-studio",
             )
         );
 
@@ -5337,7 +5340,7 @@ mod tests {
             SignallingTransport::Whep,
             SocketRole::Listen,
             "http://172.27.0.10:8080/playback",
-            "weave-alice-return-receiver-guest",
+            "connect-alice-return-receiver-guest",
         );
 
         let sender = &path.hops[0];
@@ -5357,7 +5360,7 @@ mod tests {
                 SignallingTransport::Whep,
                 SocketRole::Connect,
                 "http://172.27.0.10:8080/playback",
-                "weave-alice-return-receiver-guest",
+                "connect-alice-return-receiver-guest",
             )
         );
         assert_eq!(receiver.egresses.len(), 1);
@@ -5385,7 +5388,7 @@ mod tests {
         let b2b = StreamDefinition {
             name: "b2b".to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: input_ref("browser-a1b2", "camera"),
             destinations: vec![output_dest("display", "browser-c3d4", "player")],
@@ -5442,7 +5445,7 @@ mod tests {
                 SignallingTransport::Whep,
                 SocketRole::Listen,
                 "http://172.27.0.10:8080/playback",
-                "weave-b2b-receiver-display",
+                "connect-b2b-receiver-display",
             )
         );
     }
@@ -5462,7 +5465,7 @@ mod tests {
                 SignallingTransport::Whip,
                 SocketRole::Listen,
                 "https://edge.example/sessions",
-                "weave-alice-cam-receiver-studio",
+                "connect-alice-cam-receiver-studio",
             )
         );
     }
@@ -5609,9 +5612,9 @@ mod tests {
         assert_eq!(
             placed,
             vec![
-                ("weave-alice-cam-sender", "browser-a1b2"),
-                ("weave-alice-cam-bridge-guest-0", "strom-node-1"),
-                ("weave-alice-cam-receiver-guest", "browser-c3d4"),
+                ("connect-alice-cam-sender", "browser-a1b2"),
+                ("connect-alice-cam-bridge-guest-0", "strom-node-1"),
+                ("connect-alice-cam-receiver-guest", "browser-c3d4"),
             ]
         );
         let bridge = &path.hops[1];
@@ -5622,7 +5625,7 @@ mod tests {
                 SignallingTransport::Whip,
                 SocketRole::Listen,
                 "http://172.26.0.10:8080/ingest",
-                "weave-alice-cam-bridge-guest-0",
+                "connect-alice-cam-bridge-guest-0",
             )
         );
         assert_eq!(bridge.egresses.len(), 1);
@@ -5632,7 +5635,7 @@ mod tests {
                 SignallingTransport::Whep,
                 SocketRole::Listen,
                 "http://172.26.0.10:8080/playback",
-                "weave-alice-cam-receiver-guest",
+                "connect-alice-cam-receiver-guest",
             )
         );
         assert_eq!(path.hops[0].egresses.len(), 1);
@@ -5642,7 +5645,7 @@ mod tests {
                 SignallingTransport::Whip,
                 SocketRole::Connect,
                 "http://172.26.0.10:8080/ingest",
-                "weave-alice-cam-bridge-guest-0",
+                "connect-alice-cam-bridge-guest-0",
             ),
             "the camera pushes into the relay's ingest"
         );
@@ -5652,7 +5655,7 @@ mod tests {
                 SignallingTransport::Whep,
                 SocketRole::Connect,
                 "http://172.26.0.10:8080/playback",
-                "weave-alice-cam-receiver-guest",
+                "connect-alice-cam-receiver-guest",
             ),
             "the far browser pulls it back out"
         );
@@ -5821,7 +5824,7 @@ mod tests {
             stream_endpoints(&stream, &path, &nodes()),
             Err(PlacementError::MissingHop {
                 stream: "contribution".to_string(),
-                hop: "weave-contribution-receiver-studio".to_string(),
+                hop: "connect-contribution-receiver-studio".to_string(),
             })
         );
     }
@@ -5834,7 +5837,7 @@ mod tests {
         assert_eq!(
             stream_endpoints(&stream, &path, &nodes()),
             Err(PlacementError::NoConsumerSocket {
-                hop: "weave-contribution-receiver-studio".to_string(),
+                hop: "connect-contribution-receiver-studio".to_string(),
             })
         );
     }
@@ -5848,20 +5851,20 @@ mod tests {
         assert_eq!(
             error,
             PlacementError::NotAnSrtListener {
-                hop: "weave-contribution-receiver-studio".to_string(),
+                hop: "connect-contribution-receiver-studio".to_string(),
                 socket: SocketSpec::output("player"),
             }
         );
         assert_eq!(
             error.to_string(),
-            "hop weave-contribution-receiver-studio carries the output player socket where an SRT listener is needed"
+            "hop connect-contribution-receiver-studio carries the output player socket where an SRT listener is needed"
         );
 
         path.hops[1].egresses[0].socket = SocketSpec::srt_connect("198.51.100.5", 9000, 200);
         let error = stream_endpoints(&stream, &path, &nodes()).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "hop weave-contribution-receiver-studio carries the srt connect socket where an SRT listener is needed",
+            "hop connect-contribution-receiver-studio carries the srt connect socket where an SRT listener is needed",
             "names the caller, not just the transport"
         );
     }

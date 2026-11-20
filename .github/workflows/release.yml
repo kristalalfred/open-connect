@@ -19,7 +19,7 @@ jobs:
       - id: check
         run: |
           version=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "weave-cli") | .version')
+            | jq -r '.packages[] | select(.name == "connect-cli") | .version')
           echo "workspace version: $version"
           if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
             echo "::error::tag $GITHUB_REF_NAME is not v$version, the workspace version"
@@ -90,9 +90,9 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          name="open-weave-${GITHUB_REF_NAME//\//-}-${{ matrix.name }}"
+          name="open-connect-${GITHUB_REF_NAME//\//-}-${{ matrix.name }}"
           mkdir "$name"
-          for b in weave weave-controller weave-adapter-strom weave-node; do
+          for b in connect connect-controller connect-adapter-strom connect-node; do
             cp "target/${{ matrix.target }}/release/$b" "$name/"
           done
           cp LICENSE README.md "$name/"
@@ -100,7 +100,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: open-weave-*.tar.gz
+          path: open-connect-*.tar.gz
 
   release:
     if: github.ref_type == 'tag'

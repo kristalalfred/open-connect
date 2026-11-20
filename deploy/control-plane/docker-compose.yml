@@ -1,21 +1,21 @@
-name: open-weave
+name: open-connect
 
-x-weave: &weave
-  image: ${WEAVE_IMAGE:-ghcr.io/kristalalfred/open-weave:latest}
+x-connect: &connect
+  image: ${CONNECT_IMAGE:-ghcr.io/kristalalfred/open-connect:latest}
   restart: unless-stopped
 
 x-controller: &controller
-  <<: *weave
-  command: ["weave-controller"]
+  <<: *connect
+  command: ["connect-controller"]
   environment: &controller-environment
-    WEAVE_CONTROLLER_ADDR: 0.0.0.0:8082
-    WEAVE_DASHBOARD_ADDR: 0.0.0.0:8090
-    DATABASE_URL: postgres://weave:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/weave
-    WEAVE_NORTHBOUND_TOKEN: ${WEAVE_NORTHBOUND_TOKEN:?set WEAVE_NORTHBOUND_TOKEN}
-    WEAVE_SOUTHBOUND_KEY: ${WEAVE_SOUTHBOUND_KEY:?set WEAVE_SOUTHBOUND_KEY}
-    WEAVE_SOUTHBOUND_MIN_EPOCHS: ${WEAVE_SOUTHBOUND_MIN_EPOCHS:-}
-    WEAVE_SRT_KEY_SECRET: ${WEAVE_SRT_KEY_SECRET:?set WEAVE_SRT_KEY_SECRET}
-    WEAVE_CORS_ORIGIN: ${WEAVE_CORS_ORIGIN:-}
+    CONNECT_CONTROLLER_ADDR: 0.0.0.0:8082
+    CONNECT_DASHBOARD_ADDR: 0.0.0.0:8090
+    DATABASE_URL: postgres://connect:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/connect
+    CONNECT_NORTHBOUND_TOKEN: ${CONNECT_NORTHBOUND_TOKEN:?set CONNECT_NORTHBOUND_TOKEN}
+    CONNECT_SOUTHBOUND_KEY: ${CONNECT_SOUTHBOUND_KEY:?set CONNECT_SOUTHBOUND_KEY}
+    CONNECT_SOUTHBOUND_MIN_EPOCHS: ${CONNECT_SOUTHBOUND_MIN_EPOCHS:-}
+    CONNECT_SRT_KEY_SECRET: ${CONNECT_SRT_KEY_SECRET:?set CONNECT_SRT_KEY_SECRET}
+    CONNECT_CORS_ORIGIN: ${CONNECT_CORS_ORIGIN:-}
   depends_on:
     postgres:
       condition: service_healthy
@@ -31,13 +31,13 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: weave
+      POSTGRES_USER: connect
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-      POSTGRES_DB: weave
+      POSTGRES_DB: connect
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U weave -d weave"]
+      test: ["CMD-SHELL", "pg_isready -U connect -d connect"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -47,7 +47,7 @@ services:
     <<: *controller
     environment:
       <<: *controller-environment
-      WEAVE_ADVERTISE_URL: http://controller-1:8082
+      CONNECT_ADVERTISE_URL: http://controller-1:8082
     ports:
       - "127.0.0.1:8090:8090"
 
@@ -55,7 +55,7 @@ services:
     <<: *controller
     environment:
       <<: *controller-environment
-      WEAVE_ADVERTISE_URL: http://controller-2:8082
+      CONNECT_ADVERTISE_URL: http://controller-2:8082
     ports:
       - "127.0.0.1:8091:8090"
 

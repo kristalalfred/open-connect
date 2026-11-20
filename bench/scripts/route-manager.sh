@@ -4,19 +4,19 @@ set -uo pipefail
 interval="${ROUTE_INTERVAL:-3}"
 sock="${DOCKER_SOCK:-/var/run/docker.sock}"
 
-core_containers="ow-controller ow-controller-2 ow-tls ow-browser ow-browser-2 ow-open-live-strom ow-producer ow-consumer ow-consumer-2"
+core_containers="oc-controller oc-controller-2 oc-tls oc-browser oc-browser-2 oc-open-live-strom oc-producer oc-consumer oc-consumer-2"
 core_routes="10.97.26.0/24=10.97.25.11 10.97.27.0/24=10.97.25.12"
 
-node1_containers="ow-strom-1 ow-adapter-1"
+node1_containers="oc-strom-1 oc-adapter-1"
 node1_routes="10.97.25.0/24=10.97.26.2 10.97.27.0/24=10.97.26.2"
 
-node2_containers="ow-strom-2 ow-adapter-2"
+node2_containers="oc-strom-2 oc-adapter-2"
 node2_routes="10.97.25.0/24=10.97.27.2 10.97.26.0/24=10.97.27.2"
 
-node3_containers="ow-strom-3 ow-adapter-3 ow-producer-3 ow-consumer-3"
+node3_containers="oc-strom-3 oc-adapter-3 oc-producer-3 oc-consumer-3"
 node3_routes="10.97.25.0/24=10.97.29.2 10.97.26.0/24=10.97.29.2 10.97.27.0/24=10.97.29.2"
 
-node4_containers="ow-strom-4 ow-adapter-4 ow-producer-4 ow-consumer-4"
+node4_containers="oc-strom-4 oc-adapter-4 oc-producer-4 oc-consumer-4"
 node4_routes="10.97.25.0/24=10.97.30.2 10.97.26.0/24=10.97.30.2 10.97.27.0/24=10.97.30.2"
 
 container_pid() {
@@ -60,8 +60,8 @@ while :; do
       node4) assert_routes "$name" $node4_routes ;;
     esac
   done < <(curl -s --unix-socket "$sock" --get \
-    --data-urlencode 'filters={"label":["open-weave.bench.site","open-weave.bench.project=ow-bench"]}' \
+    --data-urlencode 'filters={"label":["open-connect.bench.site","open-connect.bench.project=oc-bench"]}' \
     http://localhost/containers/json | \
-    jq -r '.[] | [.Id, .Labels["open-weave.bench.site"]] | @tsv')
+    jq -r '.[] | [.Id, .Labels["open-connect.bench.site"]] | @tsv')
   sleep "$interval"
 done

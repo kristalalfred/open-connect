@@ -21,7 +21,7 @@
       {
         "receiver": "main/output",
         "progress": {
-          "container": "ow-e2e-22833-0-main-output",
+          "container": "oc-e2e-22833-0-main-output",
           "attempts": 4,
           "decoded_frames": 1726,
           "decoded_audio_samples": 2768896,
@@ -425,13 +425,13 @@
       "data": [
         {
           "node": 1,
-          "name": "weave-e2e-22833-0-main-sender",
+          "name": "connect-e2e-22833-0-main-sender",
           "id": "38633af7-62fb-42a7-9e08-be1219c807bf",
           "running": true
         },
         {
           "node": 2,
-          "name": "weave-e2e-22833-0-main-receiver-output",
+          "name": "connect-e2e-22833-0-main-receiver-output",
           "id": "795b1e66-f6af-43d2-900f-ab4099091aca",
           "running": true
         }

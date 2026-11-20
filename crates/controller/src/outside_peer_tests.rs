@@ -1,4 +1,4 @@
-use weave_core::{
+use connect_core::{
     AudioCodec, AudioConstraint, AudioFormat, ChromaSubsampling, Container, FormatConstraint,
     Framerate, HopEndpointClass, HopProfile, MediaFormat, NetworkAttachment, NetworkListeners,
     NodeCapabilities, NodeDescriptor, NodeStatus, NodeTopology, ObservedState, PathStatus,
@@ -23,7 +23,7 @@ fn profile(id: &str, ingress: HopEndpointClass, egress: HopEndpointClass) -> Hop
         ingress,
         egress,
         max_egresses: None,
-        media_behavior: weave_core::MediaBehavior::Unknown,
+        media_behavior: connect_core::MediaBehavior::Unknown,
         merge: false,
         accepts: None,
     }
@@ -143,7 +143,7 @@ fn stream(source: StreamTransport, destinations: Vec<(&str, StreamTransport)>) -
     let stream = StreamDefinition {
         name: "feed".to_string(),
         enabled: true,
-        format_policy: weave_core::FormatPolicy::Report,
+        format_policy: connect_core::FormatPolicy::Report,
         allow_cleartext_links: false,
         source,
         destinations: destinations
@@ -171,7 +171,7 @@ fn listen_url(socket: &SocketSpec) -> &str {
     }
 }
 
-fn plan(definition: &StreamDefinition) -> weave_core::Path {
+fn plan(definition: &StreamDefinition) -> connect_core::Path {
     derive_path(
         definition,
         &nodes(),
@@ -195,7 +195,7 @@ fn an_outside_whip_sender_pushes_to_a_gateway_on_the_named_node() {
     assert!(matches!(sender.ingress, SocketSpec::Whip(_)));
     assert_eq!(
         listen_url(&sender.ingress),
-        "http://10.97.26.10:8080/whip/weave-feed-sender"
+        "http://10.97.26.10:8080/whip/connect-feed-sender"
     );
 
     let endpoints = stream_endpoints(&definition, &path, &nodes()).unwrap();
@@ -203,7 +203,7 @@ fn an_outside_whip_sender_pushes_to_a_gateway_on_the_named_node() {
     assert_eq!(ingress.node, "strom-node-1");
     assert_eq!(
         ingress.url,
-        "http://10.97.26.10:8080/whip/weave-feed-sender"
+        "http://10.97.26.10:8080/whip/connect-feed-sender"
     );
     assert_eq!(ingress.host, None);
     assert_eq!(ingress.port, None);
@@ -233,7 +233,7 @@ fn an_outside_whep_player_pulls_from_a_receiver_on_the_named_node() {
     assert_eq!(receiver.node_id, "strom-node-2");
     assert_eq!(receiver.profile_id, "srt-to-whep");
     assert!(matches!(receiver.egresses[0].socket, SocketSpec::Whep(_)));
-    let url = "http://10.97.27.10:8080/whep/weave-feed-receiver-monitor";
+    let url = "http://10.97.27.10:8080/whep/connect-feed-receiver-monitor";
     assert_eq!(listen_url(&receiver.egresses[0].socket), url);
 
     let endpoints = stream_endpoints(&definition, &path, &nodes()).unwrap();
@@ -285,11 +285,11 @@ fn a_network_pin_picks_the_signalling_base_on_that_network() {
     let endpoints = stream_endpoints(&definition, &path, &nodes()).unwrap();
     assert_eq!(
         endpoints.ingress.unwrap().url,
-        "http://192.168.1.10:28080/whip/weave-feed-sender"
+        "http://192.168.1.10:28080/whip/connect-feed-sender"
     );
     assert_eq!(
         endpoints.destinations[0].endpoint.as_ref().unwrap().url,
-        "http://192.168.1.10:28081/whep/weave-feed-receiver-monitor"
+        "http://192.168.1.10:28081/whep/connect-feed-receiver-monitor"
     );
 }
 
@@ -354,15 +354,15 @@ fn a_placed_stream_reports_the_urls_outside_peers_call() {
     let status = &outcome.streams[0];
     assert!(status.conditions.iter().any(|condition| {
         condition.condition_type == StreamConditionType::PlacementReady
-            && condition.status == weave_core::StreamConditionStatus::True
+            && condition.status == connect_core::StreamConditionStatus::True
     }));
     assert_eq!(
         status.ingress.as_ref().unwrap().url,
-        "http://10.97.26.10:8080/whip/weave-feed-sender"
+        "http://10.97.26.10:8080/whip/connect-feed-sender"
     );
     assert_eq!(
         status.destinations[0].endpoint.as_ref().unwrap().url,
-        "http://10.97.27.10:8080/whep/weave-feed-receiver-monitor"
+        "http://10.97.27.10:8080/whep/connect-feed-receiver-monitor"
     );
     assert_eq!(
         outcome.endpoints["feed"].ingress, status.ingress,
@@ -415,7 +415,9 @@ fn reconcile_whip_source(format: Option<MediaFormat>) -> crate::ReconcileOutcome
     )
 }
 
-fn format_compatible(conditions: &[weave_core::StreamCondition]) -> &weave_core::StreamCondition {
+fn format_compatible(
+    conditions: &[connect_core::StreamCondition],
+) -> &connect_core::StreamCondition {
     conditions
         .iter()
         .find(|condition| condition.condition_type == StreamConditionType::FormatCompatible)

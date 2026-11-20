@@ -20,14 +20,14 @@ use scenario::Scenario;
 #[derive(Parser)]
 #[command(
     version,
-    about = "Run media scenarios against the local open-weave bench"
+    about = "Run media scenarios against the local open-connect bench"
 )]
 struct Cli {
     #[arg(long, default_value_os_t = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../bench"), global = true)]
     bench: PathBuf,
     #[arg(
         long,
-        env = "WEAVE_NORTHBOUND_URL",
+        env = "CONNECT_NORTHBOUND_URL",
         hide_env_values = true,
         default_value = "https://localhost:29443",
         global = true
@@ -35,7 +35,7 @@ struct Cli {
     url: String,
     #[arg(
         long,
-        env = "WEAVE_NORTHBOUND_TOKEN",
+        env = "CONNECT_NORTHBOUND_TOKEN",
         default_value = "bench-northbound-token",
         hide_env_values = true,
         global = true
@@ -43,7 +43,7 @@ struct Cli {
     token: String,
     #[arg(
         long,
-        env = "WEAVE_STROM_TOKEN",
+        env = "CONNECT_STROM_TOKEN",
         default_value = "bench-strom-key-for-local-use-only",
         hide_env_values = true,
         global = true
@@ -248,7 +248,7 @@ async fn main() -> Result<()> {
         ] {
             display.detail(&format!("capturing {service} logs"));
             let capture = async {
-                let logs = runtime::logs(&format!("ow-{service}")).await?;
+                let logs = runtime::logs(&format!("oc-{service}")).await?;
                 std::fs::write(
                     case_dir.join(format!("{service}.log")),
                     report::redact(&logs),

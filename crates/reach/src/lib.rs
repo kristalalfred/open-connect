@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
+use connect_core::{HardwareAddress, NodeObservation, ReflexiveAddress, Uplink};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use weave_core::{HardwareAddress, NodeObservation, ReflexiveAddress, Uplink};
 
 pub const STUN_SERVERS: [&str; 2] = ["stun.cloudflare.com:3478", "stun.l.google.com:19302"];
 

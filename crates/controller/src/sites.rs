@@ -1,11 +1,11 @@
 use std::fmt::Write;
 use std::net::Ipv4Addr;
 
-use sha2::{Digest, Sha256};
-use weave_core::{
+use connect_core::{
     NetworkAttachment, NetworkListeners, NodeObservation, NodeRegistration, NodeResource,
     NodeTopology, SITE_NETWORK_PREFIX, SiteAttachment, SiteState, SrtListener, Subnet, Uplink,
 };
+use sha2::{Digest, Sha256};
 
 pub(crate) fn resolve(registration: &NodeRegistration) -> NodeResource {
     let declared = &registration.node.topology;
@@ -110,7 +110,7 @@ mod tests {
     use std::net::SocketAddrV4;
 
     use super::*;
-    use weave_core::{
+    use connect_core::{
         DeclaredTopology, HardwareAddress, NodeCapabilities, NodeDescriptor, NodeStatus,
         PROTOCOL_VERSION, PortRange, ReflexiveAddress, SiteListener, SiteListeners,
     };
@@ -212,7 +212,7 @@ mod tests {
             })
         );
         assert!(site.network.starts_with("site-"));
-        assert!(weave_core::validate_resource_id(&site.network).is_ok());
+        assert!(connect_core::validate_resource_id(&site.network).is_ok());
         assert!(site.dial);
         let listener = site.listeners.srt.unwrap();
         assert_eq!(listener.host, "192.168.1.20");

@@ -8,10 +8,10 @@ constant time and never logged.
 
 | Variable | Held by | Accepted by |
 |---|---|---|
-| `WEAVE_NORTHBOUND_TOKEN` | operators, the `weave` CLI (`--token`), the controller | the controller, on every northbound route |
-| `WEAVE_SOUTHBOUND_KEY` | the controller | nothing; node tokens are derived from it |
-| `WEAVE_SOUTHBOUND_TOKEN` | each adapter and media node, holding its own node token | the controller, on every southbound route |
-| `WEAVE_SOUTHBOUND_MIN_EPOCHS` | the controller | nothing; the lowest token epoch each node it names may present |
+| `CONNECT_NORTHBOUND_TOKEN` | operators, the `connect` CLI (`--token`), the controller | the controller, on every northbound route |
+| `CONNECT_SOUTHBOUND_KEY` | the controller | nothing; node tokens are derived from it |
+| `CONNECT_SOUTHBOUND_TOKEN` | each adapter and media node, holding its own node token | the controller, on every southbound route |
+| `CONNECT_SOUTHBOUND_MIN_EPOCHS` | the controller | nothing; the lowest token epoch each node it names may present |
 
 The northbound token is one shared secret. The controller requires the
 credential of the API a route belongs to, so a node token cannot create streams.
@@ -22,7 +22,7 @@ A standby passes the `Authorization` header on to the leader, which checks it.
 Each node has its own token, at an epoch that is a non-negative integer:
 
 ```
-<node id>.<epoch>.<lowercase hex HMAC-SHA256(WEAVE_SOUTHBOUND_KEY, "<node id>.<epoch>")>
+<node id>.<epoch>.<lowercase hex HMAC-SHA256(CONNECT_SOUTHBOUND_KEY, "<node id>.<epoch>")>
 ```
 
 The controller recomputes the MAC and reads the node id from the token. It keeps
@@ -30,13 +30,13 @@ no list of nodes, so adding a node needs a new token and no
 restart. The key must be at least 32 characters, for example
 `openssl rand -hex 32`, because a leaked token is enough to test guesses of a
 short key offline. The controller refuses to start with a shorter key, and
-`weave node-token` refuses one.
+`connect node-token` refuses one.
 
-`weave node-token <id>` prints a node's token at epoch 0, and `--epoch <n>` at
-another. It reads the key from `WEAVE_SOUTHBOUND_KEY` only, which keeps it off
+`connect node-token <id>` prints a node's token at epoch 0, and `--epoch <n>` at
+another. It reads the key from `CONNECT_SOUTHBOUND_KEY` only, which keeps it off
 the command line, and calls no service.
 
-An adapter takes its token from `WEAVE_SOUTHBOUND_TOKEN`, or from
+An adapter takes its token from `CONNECT_SOUTHBOUND_TOKEN`, or from
 `node.southbound_token` in its config, which takes precedence.
 
 A node token acts only for its own node. A registration whose `node.id` is
@@ -49,7 +49,7 @@ get `403`:
 ```
 
 Nothing about a refused registration is recorded.
-`weave-adapter-strom` exits on a `403` at registration.
+`connect-adapter-strom` exits on a `403` at registration.
 
 The inventory reads `GET /nodes`, `GET /endpoints` and `GET /state` accept any
 node's token, and `GET /nodes` also accepts the northbound token. They list every node, endpoint and hop status, but no node's desired
@@ -60,11 +60,11 @@ route.
 ### Revoking a node
 
 Mint the node a token at a higher epoch and raise its minimum in
-`WEAVE_SOUTHBOUND_MIN_EPOCHS`, given to every controller as comma-separated
+`CONNECT_SOUTHBOUND_MIN_EPOCHS`, given to every controller as comma-separated
 `<node id>=<epoch>` pairs, such as `strom-node-1=2,guest-1=1`. A token below its
 node's minimum gets `401`. A node the variable does not name accepts every
 epoch. The controller reads the variable at startup and refuses to start when it
-does not parse. Rotating `WEAVE_SOUTHBOUND_KEY` replaces every
+does not parse. Rotating `CONNECT_SOUTHBOUND_KEY` replaces every
 node's token.
 
 ### Failing closed
@@ -74,13 +74,13 @@ or empty:
 
 | Process | Secrets |
 |---|---|
-| controller | `WEAVE_NORTHBOUND_TOKEN`, `WEAVE_SOUTHBOUND_KEY`, `WEAVE_SRT_KEY_SECRET` |
+| controller | `CONNECT_NORTHBOUND_TOKEN`, `CONNECT_SOUTHBOUND_KEY`, `CONNECT_SRT_KEY_SECRET` |
 | adapter | its node token |
 
-`WEAVE_SOUTHBOUND_KEY` and `WEAVE_SRT_KEY_SECRET` must also be at least 32
+`CONNECT_SOUTHBOUND_KEY` and `CONNECT_SRT_KEY_SECRET` must also be at least 32
 characters.
 
-`WEAVE_AUTH_DISABLED=1` or `true` turns authentication off for local work. Any
+`CONNECT_AUTH_DISABLED=1` or `true` turns authentication off for local work. Any
 other value, including `0`, leaves it on.
 
 ### Unauthenticated routes
@@ -91,7 +91,7 @@ other value, including `0`, leaves it on.
   token.
 
 `/view` exposes topology and allocated ports. The dashboard listens on
-`WEAVE_DASHBOARD_ADDR`, `127.0.0.1:8090` by default, apart from the API. Keep it
+`CONNECT_DASHBOARD_ADDR`, `127.0.0.1:8090` by default, apart from the API. Keep it
 on a private network. It serves no writes. The API's `/status` and
 `/streams/{name}/endpoints` require the northbound token.
 
@@ -102,7 +102,7 @@ passed in the URL fragment so it never reaches a server log. Without `#node=`,
 the page takes its node id from the token. A `#node=` naming another id is shown
 as rejected and never registers.
 
-A page on another origin needs `WEAVE_CORS_ORIGIN` on every controller: an exact
+A page on another origin needs `CONNECT_CORS_ORIGIN` on every controller: an exact
 origin such as `https://studio.example`, or `*` for development. When it is set,
 the controller sends CORS headers on its API listener and answers the preflight
 itself, before the bearer check and without forwarding it. It allows the `GET`
@@ -112,7 +112,7 @@ browser requests cannot register.
 ### Strom
 
 When Strom requires a bearer token (`STROM_API_KEY`), the Strom adapter
-presents `WEAVE_STROM_TOKEN`, or `strom.token` from its config, which takes
+presents `CONNECT_STROM_TOKEN`, or `strom.token` from its config, which takes
 precedence. With neither set it sends no `Authorization` header.
 
 Strom serves `/whip` and `/whep` without authentication. Anyone who can reach
@@ -125,7 +125,7 @@ The controller does not serve TLS. Terminate it at a reverse proxy in front of
 the controllers' API listeners. The bench does this with nginx (see "TLS" in
 [`bench/README.md`](../bench/README.md)).
 
-The `weave` CLI and `weave-adapter-strom` calling an `https` API URL, a standby
+The `connect` CLI and `connect-adapter-strom` calling an `https` API URL, a standby
 calling an `https` advertised URL, and the controller calling an `https`
 webhook URL trust
 the Mozilla roots built into them and the platform's certificate store.
@@ -136,7 +136,7 @@ browser trusts. There is no mTLS.
 ## SRT encryption
 
 Every SRT link between two nodes is encrypted. The controller derives its key as
-HMAC-SHA256 of `WEAVE_SRT_KEY_SECRET` over the id of the hop the link feeds and
+HMAC-SHA256 of `CONNECT_SRT_KEY_SECRET` over the id of the hop the link feeds and
 the ids of the two nodes it joins, as 64 hex characters, and puts it with
 `pbkeylen: 32` (AES-256) in both ends' desired hops.
 
@@ -148,19 +148,19 @@ the ids of the two nodes it joins, as 64 hex characters, and puts it with
 - Changing the secret rekeys every link once, and each adapter rebuilds its
   keyed flows.
 
-`WEAVE_SRT_KEY_SECRET` must be at least 32 characters. Without it the controller
-refuses to start. With `WEAVE_AUTH_DISABLED=1` and no secret, it generates a
+`CONNECT_SRT_KEY_SECRET` must be at least 32 characters. Without it the controller
+refuses to start. With `CONNECT_AUTH_DISABLED=1` and no secret, it generates a
 random one and logs a warning, and every link key changes when the controller
 restarts.
 
-Sockets that peers outside open-weave dial, or that dial out to them, take a
+Sockets that peers outside open-connect dial, or that dial out to them, take a
 [passphrase from the manifest](streams.md#encryption) instead.
 
 ### Where keys appear
 
 - Adapters get keys in `GET /nodes/{id}/desired`, and nothing else serves them.
   A node token reads only its own node's desired hops, so each node learns only
-  its own sockets' keys. Whoever holds `WEAVE_SOUTHBOUND_KEY` can mint any node's
+  its own sockets' keys. Whoever holds `CONNECT_SOUTHBOUND_KEY` can mint any node's
   token, and so read every key.
 - `/view`, `/status` and `/streams/{name}/endpoints` carry no keys.
   `POST /stream-plans` removes every passphrase from the hops it returns and

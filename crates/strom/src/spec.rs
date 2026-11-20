@@ -1,9 +1,9 @@
+use connect_core::{
+    DesiredHop, Passphrase, RistSocket, SignallingSocket, SocketSpec, SrtSocket, Track,
+};
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use weave_core::{
-    DesiredHop, Passphrase, RistSocket, SignallingSocket, SocketSpec, SrtSocket, Track,
-};
 
 const PLACEHOLDER_ID: &str = "00000000-0000-0000-0000-000000000000";
 const DEFAULT_SRC_LATENCY: u32 = 200;
@@ -71,7 +71,7 @@ pub enum MappingError {
 }
 
 pub fn flow_spec_from_hop(hop: &DesiredHop) -> Result<FlowSpec, MappingError> {
-    if hop.delivery.is_some() || hop.sockets().any(|socket| matches!(socket, SocketSpec::Srt(socket) if socket.params().payload != weave_core::PayloadKind::Raw)) {
+    if hop.delivery.is_some() || hop.sockets().any(|socket| matches!(socket, SocketSpec::Srt(socket) if socket.params().payload != connect_core::PayloadKind::Raw)) {
         return Err(MappingError::TimedDelivery);
     }
     if hop.merge_ingress.is_some() {
@@ -801,7 +801,7 @@ fn tee_srt_flow(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use weave_core::{
+    use connect_core::{
         DesiredEgress, HopRole, RistSocket, SignallingSocket, SignallingTransport, SocketRole,
         SrtParams,
     };
@@ -1085,11 +1085,11 @@ mod tests {
     fn whip_gateway_hop() -> DesiredHop {
         DesiredHop {
             delivery: None,
-            id: "weave-alice-cam-receiver-studio".to_string(),
+            id: "connect-alice-cam-receiver-studio".to_string(),
             node_id: "strom-node-2".to_string(),
             profile_id: "whip-to-srt".to_string(),
             role: HopRole::Receiver,
-            ingress: whip_socket(SocketRole::Listen, "weave-alice-cam-receiver-studio"),
+            ingress: whip_socket(SocketRole::Listen, "connect-alice-cam-receiver-studio"),
             merge_ingress: None,
             egresses: vec![egress("studio", SocketSpec::srt_listen(7003, 200))],
             tracks: None,
@@ -1099,7 +1099,7 @@ mod tests {
     fn whep_gateway_hop() -> DesiredHop {
         DesiredHop {
             delivery: None,
-            id: "weave-alice-return-sender".to_string(),
+            id: "connect-alice-return-sender".to_string(),
             node_id: "strom-node-2".to_string(),
             profile_id: "srt-to-whep".to_string(),
             role: HopRole::Sender,
@@ -1107,7 +1107,7 @@ mod tests {
             merge_ingress: None,
             egresses: vec![egress(
                 "studio",
-                whep_socket(SocketRole::Listen, "weave-alice-return-receiver-studio"),
+                whep_socket(SocketRole::Listen, "connect-alice-return-receiver-studio"),
             )],
             tracks: None,
         }
@@ -1191,7 +1191,7 @@ mod tests {
         hop.tracks = Some(vec![Track::Video]);
         hop.egresses.push(egress(
             "preview",
-            whep_socket(SocketRole::Listen, "weave-alice-return-receiver-preview"),
+            whep_socket(SocketRole::Listen, "connect-alice-return-receiver-preview"),
         ));
         let spec = flow_spec_from_hop(&hop).expect("map");
 
@@ -1220,24 +1220,24 @@ mod tests {
         hop.ingress = SocketSpec::Whip(SignallingSocket {
             role: SocketRole::Listen,
             url: "http://172.27.0.10:8080/whip/not-the-endpoint-id".to_string(),
-            endpoint_id: "weave-alice-cam-receiver-studio".to_string(),
+            endpoint_id: "connect-alice-cam-receiver-studio".to_string(),
         });
         let spec = flow_spec_from_hop(&hop).expect("map");
         assert_eq!(
             spec.blocks[0].properties["endpoint_id"],
-            Value::from("weave-alice-cam-receiver-studio")
+            Value::from("connect-alice-cam-receiver-studio")
         );
     }
 
     fn whip_to_whep_hop() -> DesiredHop {
         let mut hop = whip_gateway_hop();
-        hop.id = "weave-b2b-bridge-display-0".to_string();
+        hop.id = "connect-b2b-bridge-display-0".to_string();
         hop.profile_id = "whip-to-whep".to_string();
         hop.role = HopRole::Bridge;
-        hop.ingress = whip_socket(SocketRole::Listen, "weave-b2b-bridge-display-0");
+        hop.ingress = whip_socket(SocketRole::Listen, "connect-b2b-bridge-display-0");
         hop.egresses = vec![egress(
             "display",
-            whep_socket(SocketRole::Listen, "weave-b2b-receiver-display"),
+            whep_socket(SocketRole::Listen, "connect-b2b-receiver-display"),
         )];
         hop
     }
@@ -1271,7 +1271,7 @@ mod tests {
         let mut hop = whep_gateway_hop();
         hop.egresses.push(egress(
             "preview",
-            whep_socket(SocketRole::Listen, "weave-alice-return-receiver-preview"),
+            whep_socket(SocketRole::Listen, "connect-alice-return-receiver-preview"),
         ));
         let spec = flow_spec_from_hop(&hop).expect("map");
 
@@ -1320,7 +1320,7 @@ mod tests {
     fn rist_sender_hop() -> DesiredHop {
         DesiredHop {
             delivery: None,
-            id: "weave-feed-sender".to_string(),
+            id: "connect-feed-sender".to_string(),
             node_id: "strom-node-1".to_string(),
             profile_id: "srt-to-rist".to_string(),
             role: HopRole::Sender,
@@ -1340,7 +1340,7 @@ mod tests {
     fn rist_receiver_hop() -> DesiredHop {
         DesiredHop {
             delivery: None,
-            id: "weave-feed-receiver-studio".to_string(),
+            id: "connect-feed-receiver-studio".to_string(),
             node_id: "strom-node-2".to_string(),
             profile_id: "rist-to-srt".to_string(),
             role: HopRole::Receiver,

@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     export "$linker_var=$gnu-gcc" "CC_$(echo "$triple" | tr '-' '_')=$gnu-gcc" && \
     cargo build --release --locked --bins --target "$triple" && \
     mkdir -p /out && \
-    for b in weave weave-controller weave-adapter-strom weave-node; do \
+    for b in connect connect-controller connect-adapter-strom connect-node; do \
         cp "target/$triple/release/$b" /out/; \
     done
 
@@ -31,8 +31,8 @@ FROM debian:bookworm-slim
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl tini && \
     rm -rf /var/lib/apt/lists/* && \
-    useradd --system --create-home --uid 10001 weave
+    useradd --system --create-home --uid 10001 connect
 COPY --from=builder /out/ /usr/local/bin/
-USER weave
+USER connect
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["weave", "--help"]
+CMD ["connect", "--help"]

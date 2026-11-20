@@ -111,7 +111,7 @@ mod tests {
             }
         }
         let directory =
-            std::env::temp_dir().join(format!("weave-bench-observer-{}", std::process::id()));
+            std::env::temp_dir().join(format!("connect-bench-observer-{}", std::process::id()));
         let report = Report::new(&directory)
             .unwrap()
             .with_observer(Observer(directory.join("timeline.jsonl")));

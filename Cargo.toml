@@ -17,12 +17,12 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/KristalAlfred/open-weave"
+repository = "https://github.com/KristalAlfred/open-connect"
 
 [workspace.dependencies]
-weave-core = { path = "crates/core" }
-weave-strom = { path = "crates/strom" }
-weave-reach = { path = "crates/reach" }
+connect-core = { path = "crates/core" }
+connect-strom = { path = "crates/strom" }
+connect-reach = { path = "crates/reach" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 axum = "0.8"

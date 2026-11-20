@@ -1,9 +1,9 @@
-# open-weave
+# open-connect
 
-open-weave is a control plane for live media contribution. You declare the
+open-connect is a control plane for live media contribution. You declare the
 streams you want in a manifest. The controller plans the SRT, WHIP, WHEP and
 RIST links between your media nodes, and an adapter on each node builds them.
-No media passes through the control plane. The native `weave-node` runtime
+No media passes through the control plane. The native `connect-node` runtime
 handles SRT media and RTP inputs and outputs, including timed release and
 redundant path merging.
 
@@ -16,7 +16,7 @@ destinations:
     srt: { node: studio }
 ```
 
-`weave apply -f` that file, and `weave get stream cam1-to-studio` reads
+`connect apply -f` that file, and `connect get stream cam1-to-studio` reads
 `flowing` once both nodes have registered, a sender feeds the source, and
 something pulls from the studio destination.
 
@@ -48,7 +48,7 @@ off (local only; [Security](docs/security.md) covers the tokens), and apply the
 example from another terminal:
 
 ```sh
-export WEAVE_AUTH_DISABLED=1
+export CONNECT_AUTH_DISABLED=1
 just run-controller
 just apply
 just get-stream cam1-to-studio
@@ -61,27 +61,27 @@ The stream reads `pending` until its nodes register. For each node, run
 `strom-node-2` needs a copy with its own id, listen address, Strom URL and SRT
 port range.
 
-`weave --help` lists every command. Output defaults to tables, and
-`weave get stream NAME` adds the stream's status, conditions and destinations.
+`connect --help` lists every command. Output defaults to tables, and
+`connect get stream NAME` adds the stream's status, conditions and destinations.
 `-o yaml` or `-o json` prints the API response as returned.
 
 ## How it works
 
 ```text
-weave CLI, apps ──▶ [ northbound API │ controller │ southbound API ] ◀── adapter ──▶ Strom
+connect CLI, apps ──▶ [ northbound API │ controller │ southbound API ] ◀── adapter ──▶ Strom
 ```
 
-- **Controller** (`weave-controller`) owns all state, plans each stream's hops on
+- **Controller** (`connect-controller`) owns all state, plans each stream's hops on
   every reconcile tick, and serves both APIs and the dashboard. With Postgres,
   several controllers share one database: one leads and the others forward API
   requests to it.
 - **Northbound API** takes desired state from operators and applications. The
-  `weave` CLI is one client.
+  `connect` CLI is one client.
 - **Southbound API** is where adapters register, heartbeat and pull their node's
   desired hops.
 - **Adapters** translate hops into a runtime's own API.
-  [`weave-adapter-strom`](crates/adapter-strom) drives Strom.
-  [`weave-node`](crates/media) runs SRT media directly.
+  [`connect-adapter-strom`](crates/adapter-strom) drives Strom.
+  [`connect-node`](crates/media) runs SRT media directly.
   [`nodes/browser`](nodes/browser/README.md) is a node in a web page.
 
 The controller makes no outbound HTTP calls except configured webhooks and, on a

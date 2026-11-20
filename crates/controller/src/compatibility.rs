@@ -1,4 +1,4 @@
-use weave_core::{
+use connect_core::{
     FormatConstraint, HopRole, MediaBehavior, MediaFormat, NodeDescriptor, Path, StreamCondition,
     StreamConditionReason as Reason, StreamConditionStatus as Status, StreamConditionType,
     StreamDefinition,

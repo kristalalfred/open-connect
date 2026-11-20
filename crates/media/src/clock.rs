@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use connect_core::DeliveryReason;
 use serde::{Deserialize, Serialize};
-use weave_core::DeliveryReason;
 
 use crate::merge::ClockSample;
 

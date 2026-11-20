@@ -20,7 +20,7 @@ const STREAM: &str = "timed-demo";
 
 #[derive(Parser)]
 #[command(
-    name = "weave-timed-demo",
+    name = "connect-timed-demo",
     about = "Run an isolated local SRT timing demo with generated video, audio, and independently controllable relay paths"
 )]
 struct Args {
@@ -196,13 +196,13 @@ impl Resources {
         let log = File::create(self.root.join(format!("{name}.log")))?;
         let child = Command::new(executable)
             .args(args)
-            .env("WEAVE_AUTH_DISABLED", "1")
+            .env("CONNECT_AUTH_DISABLED", "1")
             .env(
-                "WEAVE_SRT_KEY_SECRET",
+                "CONNECT_SRT_KEY_SECRET",
                 "timed-demo-local-media-key-00000000",
             )
             .env_remove("DATABASE_URL")
-            .env_remove("WEAVE_WEBHOOK_URL")
+            .env_remove("CONNECT_WEBHOOK_URL")
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
@@ -387,7 +387,7 @@ async fn run(client: &Client) -> Result<()> {
     let node_ttl = u64::MAX.to_string();
     resources.child(
         "controller",
-        &binaries.join("weave-controller"),
+        &binaries.join("connect-controller"),
         &[
             "--listen",
             "127.0.0.1:39082",
@@ -449,7 +449,7 @@ async fn run(client: &Client) -> Result<()> {
         std::fs::write(&path, serde_norway::to_string(&configuration)?)?;
         resources.child(
             id,
-            &binaries.join("weave-node"),
+            &binaries.join("connect-node"),
             &["--config", path.to_str().context("configuration path")?],
         )?;
     }
@@ -571,14 +571,14 @@ async fn run(client: &Client) -> Result<()> {
         );
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(200)) => {},
-            result = weave_core::shutdown::signal() => { result?; return Ok(()); }
+            result = connect_core::shutdown::signal() => { result?; return Ok(()); }
         }
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    weave_core::logging::init();
+    connect_core::logging::init();
     let args = Args::parse();
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(2))
@@ -587,7 +587,7 @@ async fn main() -> Result<()> {
     match args.action.unwrap_or(Action::Run) {
         Action::Run => tokio::select! {
             result = run(&client) => result,
-            result = weave_core::shutdown::signal() => result.context("waiting for demo shutdown"),
+            result = connect_core::shutdown::signal() => result.context("waiting for demo shutdown"),
         },
         Action::Auto => change_policy(&client, true).await,
         Action::Fixed => change_policy(&client, false).await,

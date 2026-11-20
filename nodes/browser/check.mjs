@@ -9,8 +9,8 @@ const checkOnly = Boolean(args["check-only"]);
 await checkDeclaredConstants(checkOnly);
 if (checkOnly) process.exit(0);
 
-const southbound = args.southbound || process.env.WEAVE_SOUTHBOUND_URL;
-const token = args.token ?? process.env.WEAVE_SOUTHBOUND_TOKEN ?? "";
+const southbound = args.southbound || process.env.CONNECT_SOUTHBOUND_URL;
+const token = args.token ?? process.env.CONNECT_SOUTHBOUND_TOKEN ?? "";
 if (!southbound) {
   console.error("usage: check.mjs --southbound URL [--token T] [--page URL] [--serve PORT] [--stay]");
   process.exit(2);
@@ -51,7 +51,7 @@ if (!page) {
 
 const { chromium } = await import("playwright");
 
-const executablePath = args.executable || process.env.WEAVE_BROWSER_EXECUTABLE;
+const executablePath = args.executable || process.env.CONNECT_BROWSER_EXECUTABLE;
 const browser = await chromium.launch({
   ...(executablePath ? { executablePath } : { channel: "chromium" }),
   headless: !args.headed,
@@ -65,7 +65,7 @@ const context = await browser.newContext({ permissions: ["camera", "microphone"]
 const tab = await context.newPage();
 tab.on("console", message => console.log(`[page] ${message.text()}`));
 tab.on("pageerror", error => console.log(`[page error] ${error.message}`));
-const videoOnly = args["video-only"] || process.env.WEAVE_BROWSER_MEDIA === "video";
+const videoOnly = args["video-only"] || process.env.CONNECT_BROWSER_MEDIA === "video";
 const media = videoOnly ? "&media=video" : "";
 const iceServers = typeof args.ice === "string" ? `&ice=${encodeURIComponent(args.ice)}` : "";
 const pinned = args.node ? `&node=${encodeURIComponent(args.node)}` : "";
@@ -214,14 +214,14 @@ async function checkHopRevision(source, path) {
   const first = { z: [1, { b: 2, a: "x" }], a: null };
   const second = { a: null, z: [1, { a: "x", b: 2 }] };
   const { createHash } = await import("node:crypto");
-  const expected = createHash("sha256").update('open-weave hop\0{"a":null,"z":[1,{"a":"x","b":2}]}').digest("hex");
+  const expected = createHash("sha256").update('open-connect hop\0{"a":null,"z":[1,{"a":"x","b":2}]}').digest("hex");
   if (await hash(first) !== expected || await hash(second) !== expected) fail(`${path} has an incompatible hop revision`);
   const hop = {
     id: "hop-a", node_id: "node-a", profile_id: "local", role: "sender",
     ingress: { transport: "input", id: "camera" },
     egresses: [{ branch_id: "studio", transport: "output", id: "player" }],
   };
-  if (await hash(hop) !== "3863eff83ea855efb81128098118c8f26b03294081b15e0b02441ec7a66e516d") fail(`${path} does not match the Rust hop revision vector`);
+  if (await hash(hop) !== "c2156e5a7248e18975d2fa5358265673966af0cadee41033edaf9dee0ce48d29") fail(`${path} does not match the Rust hop revision vector`);
   console.log("browser hop revisions hash canonical JSON");
 }
 

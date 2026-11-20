@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub const TIMED_PROTOCOL: &str = "weave_timed_v1";
+pub const TIMED_PROTOCOL: &str = "connect_timed_v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
@@ -155,7 +155,7 @@ pub struct TimedHop {
 pub enum PayloadKind {
     #[default]
     Raw,
-    WeaveTimedV1,
+    ConnectTimedV1,
 }
 
 impl PayloadKind {

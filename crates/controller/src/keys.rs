@@ -2,20 +2,20 @@ use std::fmt::{self, Write};
 use std::time::Duration;
 
 use base64::Engine;
+use connect_core::{Passphrase, PeerAttempt, PeerSocket, TurnCredential, TurnServer};
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use sha2::Sha256;
-use weave_core::{Passphrase, PeerAttempt, PeerSocket, TurnCredential, TurnServer};
 
-pub(crate) const SECRET_VAR: &str = "WEAVE_SRT_KEY_SECRET";
-pub(crate) const STUN_VAR: &str = "WEAVE_STUN_SERVERS";
-pub(crate) const TURN_VAR: &str = "WEAVE_TURN_SERVERS";
-pub(crate) const TURN_SECRET_VAR: &str = "WEAVE_TURN_SECRET";
-pub(crate) const TURN_USERNAME_VAR: &str = "WEAVE_TURN_USERNAME";
-pub(crate) const TURN_CREDENTIAL_VAR: &str = "WEAVE_TURN_CREDENTIAL";
-pub(crate) const TURN_TTL_VAR: &str = "WEAVE_TURN_CREDENTIAL_TTL_SECS";
+pub(crate) const SECRET_VAR: &str = "CONNECT_SRT_KEY_SECRET";
+pub(crate) const STUN_VAR: &str = "CONNECT_STUN_SERVERS";
+pub(crate) const TURN_VAR: &str = "CONNECT_TURN_SERVERS";
+pub(crate) const TURN_SECRET_VAR: &str = "CONNECT_TURN_SECRET";
+pub(crate) const TURN_USERNAME_VAR: &str = "CONNECT_TURN_USERNAME";
+pub(crate) const TURN_CREDENTIAL_VAR: &str = "CONNECT_TURN_CREDENTIAL";
+pub(crate) const TURN_TTL_VAR: &str = "CONNECT_TURN_CREDENTIAL_TTL_SECS";
 const MIN_SECRET_LEN: usize = 32;
-const LINK_LABEL: &[u8] = b"open-weave srt link\0";
+const LINK_LABEL: &[u8] = b"open-connect srt link\0";
 const DEFAULT_STUN: [&str; 2] = ["stun.cloudflare.com:3478", "stun.l.google.com:19302"];
 const DEFAULT_TURN_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 pub(crate) const TURN_RENEW_BEFORE: Duration = Duration::from_secs(10 * 60);
@@ -167,7 +167,7 @@ impl fmt::Debug for LinkKeys {
 pub(crate) enum SecretError {
     #[error(
         "{SECRET_VAR} is unset or empty: set it to a random value of at least {MIN_SECRET_LEN} characters, or set {}=1 to generate one per run (local development only)",
-        weave_core::auth::AUTH_DISABLED_VAR
+        connect_core::auth::AUTH_DISABLED_VAR
     )]
     Missing,
     #[error("{SECRET_VAR} must be at least {MIN_SECRET_LEN} characters")]
@@ -236,7 +236,7 @@ impl LinkKeys {
     pub(crate) fn from_env() -> Result<(Self, SecretSource), SecretError> {
         Self::resolve(
             std::env::var(SECRET_VAR).ok().as_deref(),
-            weave_core::auth::auth_disabled(),
+            connect_core::auth::auth_disabled(),
         )
     }
 
@@ -294,11 +294,11 @@ impl LinkKeys {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use weave_core::PeerLinkId;
+    use connect_core::PeerLinkId;
 
     const SECRET: &str = "0123456789abcdef0123456789abcdef";
 
-    const HOP: &str = "weave-feed-receiver-studio";
+    const HOP: &str = "connect-feed-receiver-studio";
     const ENDS: [&str; 2] = ["source", "studio-node"];
 
     #[test]
@@ -308,7 +308,7 @@ mod tests {
         assert_eq!(key, keys.link(HOP, ENDS));
         assert_eq!(key.expose().len(), 64);
         assert!(key.expose().bytes().all(|byte| byte.is_ascii_hexdigit()));
-        assert_ne!(key, keys.link("weave-feed-receiver-preview", ENDS));
+        assert_ne!(key, keys.link("connect-feed-receiver-preview", ENDS));
         assert_ne!(key, LinkKeys::new(format!("{SECRET}x")).link(HOP, ENDS));
     }
 
@@ -368,7 +368,7 @@ mod tests {
 
     fn attempt(generation: u32) -> PeerAttempt {
         PeerAttempt {
-            link: PeerLinkId::new("weave-music-receiver-filip"),
+            link: PeerLinkId::new("connect-music-receiver-filip"),
             generation,
         }
     }
@@ -392,7 +392,7 @@ mod tests {
             .unwrap(),
         );
         let socket = keys.peer_socket(attempt(1_761_300_000));
-        let username = "1761303600:weave-music-receiver-filip";
+        let username = "1761303600:connect-music-receiver-filip";
         assert_eq!(
             socket
                 .turn
@@ -423,13 +423,13 @@ mod tests {
         assert!(!minted.turn_renewal_due(generation, expiry - 601));
         assert!(minted.turn_renewal_due(generation, expiry - 600));
         let fixed = LinkKeys::with_test_turn(&[
-            (TURN_USERNAME_VAR, "weave"),
+            (TURN_USERNAME_VAR, "connect"),
             (TURN_CREDENTIAL_VAR, "static-password"),
         ]);
         assert!(!fixed.turn_renewal_due(generation, expiry + 1));
         assert!(!LinkKeys::new(SECRET).turn_renewal_due(generation, expiry + 1));
         let socket = fixed.peer_socket(attempt(generation));
-        assert_eq!(socket.turn[0].username, "weave");
+        assert_eq!(socket.turn[0].username, "connect");
         assert_eq!(socket.turn[0].credential.expose(), "static-password");
     }
 
@@ -437,7 +437,7 @@ mod tests {
     fn turn_settings_take_exactly_one_form_of_credentials() {
         let servers = (TURN_VAR, "turn.example:3478");
         let secret = (TURN_SECRET_VAR, "shared");
-        let username = (TURN_USERNAME_VAR, "weave");
+        let username = (TURN_USERNAME_VAR, "connect");
         let credential = (TURN_CREDENTIAL_VAR, "password");
         for (vars, error) in [
             (vec![servers], IceError::NoTurnCredentials),

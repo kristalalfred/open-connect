@@ -1,5 +1,5 @@
 use super::*;
-use weave_core::{
+use connect_core::{
     DeclaredTopology, DeliveryCapability, DeliveryPathReport, DeliveryPolicy, DeliveryReport,
     DeliveryRole, DeliveryState, EgressStatus, FormatConstraint, HopEndpointClass, HopProfile,
     HopState, HopStatus, LinkCondition, MediaBehavior, NodeCapabilities, NodeDescriptor,
@@ -34,7 +34,7 @@ fn node(id: &str, epoch: u64) -> NodeDescriptor {
     timed.id = "srt-timed".into();
     timed.merge = true;
     timed.timed_delivery = Some(DeliveryCapability {
-        protocol: weave_core::delivery::TIMED_PROTOCOL.into(),
+        protocol: connect_core::delivery::TIMED_PROTOCOL.into(),
         roles: vec![
             DeliveryRole::Origin,
             DeliveryRole::Forward,
@@ -86,9 +86,9 @@ fn timed_routes_frame_internal_links_and_merge_only_authorized_copies() {
         receiver.delivery.as_ref().unwrap().delivery_id
     );
     assert!(receiver.merge_ingress.is_some());
-    assert!(origin.egresses.iter().all(|egress| matches!(&egress.socket, weave_core::SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::WeaveTimedV1)));
+    assert!(origin.egresses.iter().all(|egress| matches!(&egress.socket, connect_core::SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::ConnectTimedV1)));
     assert!(
-        matches!(&receiver.egresses[0].socket, weave_core::SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::Raw)
+        matches!(&receiver.egresses[0].socket, connect_core::SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::Raw)
     );
     let mut budget_changed = stream();
     budget_changed.destinations[0].delivery = Some(DeliveryPolicy::Fixed {
@@ -130,7 +130,7 @@ fn unsupported_nodes_clock_domains_and_impossible_budgets_are_not_scheduled() {
                     .clock_domain = "different".into()
             }
             _ => {
-                if let weave_core::StreamTransport::Srt(endpoint) =
+                if let connect_core::StreamTransport::Srt(endpoint) =
                     &mut definition.destinations[0].endpoint
                 {
                     endpoint.latency = Some(1000);
@@ -253,7 +253,7 @@ async fn source_identity_survives_destination_updates_and_changes_after_recreati
         .unwrap();
     assert_eq!(created.source_revision, updated.source_revision);
     let mut new_source = changed.clone();
-    if let weave_core::StreamTransport::Srt(endpoint) = &mut new_source.source {
+    if let connect_core::StreamTransport::Srt(endpoint) = &mut new_source.source {
         endpoint.node = Some("other".into());
     }
     let replaced = store
@@ -279,7 +279,7 @@ fn current_origin_clock_fault_overrides_a_ready_receiver() {
     observed.hops = planned.hops_by_stream["timed"].iter().map(report).collect();
     observed.hops[0].delivery = Some(DeliveryReport {
         state: DeliveryState::Degraded,
-        reason: weave_core::DeliveryReason::ClockUnavailable,
+        reason: connect_core::DeliveryReason::ClockUnavailable,
         ..DeliveryReport::default()
     });
     let failed = reconcile(vec![stream()], &observed, &LinkKeys::for_tests());
@@ -287,7 +287,7 @@ fn current_origin_clock_fault_overrides_a_ready_receiver() {
     assert_eq!(destination.status, PathStatus::Degraded);
     assert_eq!(
         destination.delivery.as_ref().unwrap().reason,
-        weave_core::DeliveryReason::ClockUnavailable
+        connect_core::DeliveryReason::ClockUnavailable
     );
     observed.hops[0].revision = "stale".into();
     let recovered = reconcile(vec![stream()], &observed, &LinkKeys::for_tests());

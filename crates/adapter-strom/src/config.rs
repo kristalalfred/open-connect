@@ -1,11 +1,11 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use connect_core::NodeConfig;
+use connect_core::auth::Token;
 use serde::Deserialize;
-use weave_core::NodeConfig;
-use weave_core::auth::Token;
 
-pub const STROM_TOKEN_VAR: &str = "WEAVE_STROM_TOKEN";
+pub const STROM_TOKEN_VAR: &str = "CONNECT_STROM_TOKEN";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,7 +31,7 @@ fn default_poll_interval_secs() -> u64 {
 }
 
 fn default_request_timeout_secs() -> u64 {
-    weave_strom::REQUEST_TIMEOUT.as_secs()
+    connect_strom::REQUEST_TIMEOUT.as_secs()
 }
 
 impl StromSection {
@@ -188,7 +188,7 @@ strom:
         assert!(unfilled.is_empty(), "placeholders left: {unfilled:?}");
 
         let path =
-            std::env::temp_dir().join(format!("weave-deploy-node-{}.yaml", std::process::id()));
+            std::env::temp_dir().join(format!("connect-deploy-node-{}.yaml", std::process::id()));
         std::fs::write(&path, filled).expect("writing the filled-in template");
         let loaded = AdapterConfig::load(&path);
         std::fs::remove_file(&path).expect("removing the filled-in template");
@@ -198,7 +198,7 @@ strom:
     #[test]
     fn refuses_an_unknown_field_inside_a_port_range() {
         let path =
-            std::env::temp_dir().join(format!("weave-port-step-{}.yaml", std::process::id()));
+            std::env::temp_dir().join(format!("connect-port-step-{}.yaml", std::process::id()));
         std::fs::write(
             &path,
             VALID.replace(
@@ -217,7 +217,7 @@ strom:
     #[test]
     fn refuses_a_site_attachment() {
         let path =
-            std::env::temp_dir().join(format!("weave-strom-site-{}.yaml", std::process::id()));
+            std::env::temp_dir().join(format!("connect-strom-site-{}.yaml", std::process::id()));
         std::fs::write(
             &path,
             VALID.replace(

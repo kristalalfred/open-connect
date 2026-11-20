@@ -4,12 +4,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use tokio::sync::{mpsc, watch};
-use tokio::task::JoinHandle;
-use weave_core::{
+use connect_core::{
     DeliveryReason, DeliveryReport, DeliveryRole, DeliveryState, DesiredHop, EgressStatus,
     HopState, HopStatus, LocalEnd, LocalSocket, PayloadKind, SocketSpec, SocketStatus,
 };
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 
 use crate::clock::Clock;
 use crate::endpoint::Endpoint;
@@ -52,7 +52,7 @@ fn initial_report(desired: &DesiredHop) -> HopStatus {
         state: HopState::Pending,
         ingress: SocketStatus {
             peer: None,
-            condition: weave_core::LinkCondition::Connecting,
+            condition: connect_core::LinkCondition::Connecting,
             resolved: None,
             stats: None,
         },
@@ -120,15 +120,15 @@ fn validate(desired: &DesiredHop, settings: &Settings) -> anyhow::Result<()> {
             "native timed hops only carry SRT"
         );
         let (profile, role) = match timing.role {
-            DeliveryRole::Origin => ("srt-timed-origin", weave_core::HopRole::Sender),
-            DeliveryRole::Forward => ("srt-timed-forward", weave_core::HopRole::Bridge),
-            DeliveryRole::Receiver => ("srt-timed-receiver", weave_core::HopRole::Receiver),
+            DeliveryRole::Origin => ("srt-timed-origin", connect_core::HopRole::Sender),
+            DeliveryRole::Forward => ("srt-timed-forward", connect_core::HopRole::Bridge),
+            DeliveryRole::Receiver => ("srt-timed-receiver", connect_core::HopRole::Receiver),
         };
         anyhow::ensure!(
             desired.profile_id == profile && desired.role == role && timing.epoch != 0,
             "invalid native timed profile, role or epoch"
         );
-        let framed = |socket: &SocketSpec| matches!(socket, SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::WeaveTimedV1 && socket.params().passphrase.is_some());
+        let framed = |socket: &SocketSpec| matches!(socket, SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::ConnectTimedV1 && socket.params().passphrase.is_some());
         match timing.role {
             DeliveryRole::Origin => anyhow::ensure!(
                 raw(&desired.ingress) && desired.merge_ingress.is_none(),
@@ -353,7 +353,7 @@ impl Actor {
                     for output in self
                         .outputs
                         .values()
-                        .filter(|output| output.payload() == PayloadKind::WeaveTimedV1)
+                        .filter(|output| output.payload() == PayloadKind::ConnectTimedV1)
                     {
                         let _ = output.try_send(encoded.clone(), clock.monotonic_ns());
                     }
@@ -553,12 +553,12 @@ async fn run(
 
 #[cfg(test)]
 mod tests {
-    use futures::{SinkExt, StreamExt};
-    use srt_tokio::SrtSocket;
-    use weave_core::{
+    use connect_core::{
         DeliveryPolicy, DesiredEgress, HopRole, Passphrase, SrtParams, SrtSocket as SrtSpec,
         TimedHop,
     };
+    use futures::{SinkExt, StreamExt};
+    use srt_tokio::SrtSocket;
 
     use super::*;
     use crate::clock::ClockConfig;
@@ -632,7 +632,7 @@ mod tests {
     fn params(timed: bool, latency: u32) -> SrtParams {
         SrtParams {
             payload: if timed {
-                PayloadKind::WeaveTimedV1
+                PayloadKind::ConnectTimedV1
             } else {
                 PayloadKind::Raw
             },
@@ -860,7 +860,7 @@ mod tests {
                 inputs: vec![RtpInput {
                     id: "mic".into(),
                     label: "Mic".into(),
-                    tracks: vec![weave_core::Track::Audio],
+                    tracks: vec![connect_core::Track::Audio],
                     address: std::net::Ipv4Addr::LOCALHOST,
                     port: input_port,
                     source: None,
@@ -900,7 +900,7 @@ mod tests {
                     }),
                 })
                 .collect(),
-            tracks: Some(vec![weave_core::Track::Audio]),
+            tracks: Some(vec![connect_core::Track::Audio]),
             delivery: None,
         };
         let receiver = DesiredHop {
@@ -920,7 +920,7 @@ mod tests {
                 branch_id: "studio".into(),
                 socket: SocketSpec::output("bus"),
             }],
-            tracks: Some(vec![weave_core::Track::Audio]),
+            tracks: Some(vec![connect_core::Track::Audio]),
             delivery: None,
         };
         let mut origin = Hop::start(sender.clone(), settings.clone(), Arc::default()).unwrap();
@@ -990,7 +990,7 @@ mod tests {
         assert_eq!(report.state, HopState::Provisioned);
         assert_eq!(
             report.egresses[0].status.condition,
-            weave_core::LinkCondition::Flowing
+            connect_core::LinkCondition::Flowing
         );
     }
 }

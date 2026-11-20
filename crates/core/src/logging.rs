@@ -3,7 +3,7 @@ use std::fmt;
 
 use tracing_subscriber::EnvFilter;
 
-pub const LOG_FORMAT_VAR: &str = "WEAVE_LOG_FORMAT";
+pub const LOG_FORMAT_VAR: &str = "CONNECT_LOG_FORMAT";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFormat {

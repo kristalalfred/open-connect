@@ -4,11 +4,11 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use connect_core::auth::{Guard, NodeGuard};
+use connect_core::{DesiredHop, PROTOCOL_VERSION};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
-use weave_core::auth::{Guard, NodeGuard};
-use weave_core::{DesiredHop, PROTOCOL_VERSION};
 
 use crate::keys::{LinkKeys, TURN_CREDENTIAL_VAR, TURN_USERNAME_VAR};
 use crate::store::MemStore;
@@ -19,7 +19,7 @@ const HOME: &str = "198.51.100.4";
 const CAFE: &str = "192.0.2.77";
 const RELAY_HOST: &str = "192.168.1.10";
 const TURN: &str = "192.0.2.50:3478";
-const LINK: &str = "weave-music-to-filip-receiver-filip";
+const LINK: &str = "connect-music-to-filip-receiver-filip";
 const OFFER: &str = "v=0\r\na=candidate:1 1 udp 2130706431 192.168.1.20 50000 typ host\r\na=candidate:2 1 udp 16777215 192.0.2.50 3478 typ relay raddr 203.0.113.7 rport 61000\r\n";
 const OTHER_OFFER: &str = "v=0\r\na=candidate:1 1 udp 2130706431 192.168.1.20 50002 typ host\r\na=candidate:2 1 udp 16777215 192.0.2.50 3478 typ relay raddr 203.0.113.7 rport 61002\r\n";
 const OFFER_WITHOUT_TURN: &str =
@@ -153,8 +153,8 @@ fn relay() -> Value {
     json!({
         "protocol_version": PROTOCOL_VERSION,
         "node": {
-            "id": "weave-relay",
-            "endpoint": "http://weave-relay:8091",
+            "id": "connect-relay",
+            "endpoint": "http://connect-relay:8091",
             "status": "ready",
             "capabilities": {
                 "hop_profiles": [{
@@ -390,7 +390,7 @@ async fn sites_link_over_webrtc_with_the_descriptions_relayed_through_the_signal
     assert_eq!(same, socket);
     assert_eq!(sender["profile_id"], "app-audio-out");
     assert_eq!(receiver["profile_id"], "webrtc-to-speaker");
-    assert_eq!(desired(&app, "weave-relay").await, json!([]));
+    assert_eq!(desired(&app, "connect-relay").await, json!([]));
     assert!(
         detail(&app)
             .await
@@ -478,12 +478,12 @@ async fn descriptions_reach_only_the_two_ends_and_no_shared_route() {
         .to_string();
 
     assert_eq!(
-        signal(&app, "weave-relay", &[(g, "v=0 forged")]).await,
+        signal(&app, "connect-relay", &[(g, "v=0 forged")]).await,
         reply(&[], &[])
     );
     assert_eq!(signal(&app, "filips-mac", &[]).await, reply(&[], &[]));
     signal_both(&app, g).await;
-    assert_eq!(signal(&app, "weave-relay", &[]).await, reply(&[], &[]));
+    assert_eq!(signal(&app, "connect-relay", &[]).await, reply(&[], &[]));
 
     reconcile_tick(&state).await;
     let (_, plan) = send(&app, "POST", "/stream-plans", Some(music_to_filip())).await;
@@ -578,7 +578,11 @@ async fn an_unreachable_link_falls_back_to_the_srt_relay() {
     reconcile_tick(&state).await;
 
     assert_eq!(
-        desired(&app, "weave-relay").await.as_array().unwrap().len(),
+        desired(&app, "connect-relay")
+            .await
+            .as_array()
+            .unwrap()
+            .len(),
         1
     );
     let socket = sent(&app).await;
@@ -589,7 +593,7 @@ async fn an_unreachable_link_falls_back_to_the_srt_relay() {
     assert_eq!(receiver["profile_id"], "srt-to-speaker");
     assert_eq!(
         detail(&app).await,
-        "the stream has a complete path; destination filip: relayed through weave-relay: the webrtc link alfreds-mac to filips-mac connected neither directly nor through TURN within 10 s of the answer"
+        "the stream has a complete path; destination filip: relayed through connect-relay: the webrtc link alfreds-mac to filips-mac connected neither directly nor through TURN within 10 s of the answer"
     );
     assert_eq!(signal(&app, "filips-mac", &[]).await, reply(&[], &[]));
 }
@@ -644,7 +648,7 @@ async fn a_lost_link_is_reoffered_and_a_second_loss_goes_to_the_relay() {
     assert_eq!(sent(&app).await["transport"], "srt");
     assert!(
         detail(&app).await.contains(
-            "relayed through weave-relay: the webrtc link alfreds-mac to filips-mac was lost twice within 120 s"
+            "relayed through connect-relay: the webrtc link alfreds-mac to filips-mac was lost twice within 120 s"
         ),
         "{}",
         detail(&app).await
@@ -719,7 +723,7 @@ async fn only_a_minted_login_on_a_relayed_link_is_renewed_before_it_expires() {
 async fn a_static_login_is_never_renewed() {
     let fixed = || {
         LinkKeys::with_test_turn(&[
-            (TURN_USERNAME_VAR, "weave"),
+            (TURN_USERNAME_VAR, "connect"),
             (TURN_CREDENTIAL_VAR, "static-password"),
         ])
     };
@@ -727,7 +731,7 @@ async fn a_static_login_is_never_renewed() {
     assert_eq!(kept, aged);
     let (_, app) = bench(Arc::new(MemStore::new()), fixed(), true).await;
     let socket = sent(&app).await;
-    assert_eq!(socket["turn"][0]["username"], "weave");
+    assert_eq!(socket["turn"][0]["username"], "connect");
     assert_eq!(socket["turn"][0]["credential"], "static-password");
 }
 
@@ -757,7 +761,7 @@ async fn a_new_generation_holds_while_both_ends_report_the_old_one_until_its_dea
     assert_eq!(sent(&app).await["transport"], "srt");
     assert!(
         detail(&app).await.contains(
-            "relayed through weave-relay: the webrtc link alfreds-mac to filips-mac got no offer from alfreds-mac within 20 s"
+            "relayed through connect-relay: the webrtc link alfreds-mac to filips-mac got no offer from alfreds-mac within 20 s"
         ),
         "{}",
         detail(&app).await
@@ -840,13 +844,13 @@ async fn a_webrtc_peer_address_holds_no_port_on_the_node_that_reports_it() {
             .cloned()
             .unwrap_or_else(|| panic!("{id} in {hops}"))
     };
-    let receiver = "weave-anna-to-alfred-receiver-alfred";
+    let receiver = "connect-anna-to-alfred-receiver-alfred";
     let port = on_alfred(desired(&app, "alfreds-mac").await, receiver)["ingress"]["port"].clone();
     assert!(port.is_u64(), "{port}");
 
     let sender = on_alfred(
         desired(&app, "alfreds-mac").await,
-        "weave-music-to-filip-sender",
+        "connect-music-to-filip-sender",
     );
     let socket = link_socket(&sender);
     heartbeat(
@@ -906,7 +910,7 @@ async fn one_stream_fans_out_over_srt_on_its_site_and_webrtc_across_sites() {
     assert_eq!(egresses[0]["host"], ANNA.address);
     assert_eq!(egresses[1]["branch_id"], "filip");
     assert_eq!(egresses[1]["transport"], "webrtc");
-    assert_eq!(egresses[1]["link"], "weave-music-receiver-filip");
+    assert_eq!(egresses[1]["link"], "connect-music-receiver-filip");
     let anna = hop(&app, "annas-mac").await;
     assert_eq!(anna["profile_id"], "srt-to-speaker");
     let filip = hop(&app, "filips-mac").await;

@@ -60,10 +60,10 @@ A release can add fields to northbound responses and webhook events, values to
 their enumerations, such as a condition `reason`, a status or an error `code`,
 and kinds to their unions, such as a destination transport. A client must ignore
 a field it does not know and must accept a value or a kind it does not know.
-`weave` prints an unknown value as it arrives, and `-o json` and `-o yaml` print
+`connect` prints an unknown value as it arrives, and `-o json` and `-o yaml` print
 the response body as returned. A Rust client reads responses with the types in
-`weave_core::read`, which ignore unknown fields and keep unknown values. The
-other `weave_core` types refuse anything they do not name.
+`connect_core::read`, which ignore unknown fields and keep unknown values. The
+other `connect_core` types refuse anything they do not name.
 
 Southbound payloads are exact for one protocol version. See
 [Registration](#registration).
@@ -130,7 +130,7 @@ reason, such as Postgres going away, is handled the same way.
 
 Hop ids join names with `-`, so two valid streams can spell the same id: the
 sender of stream `x-receiver-a` and the receiver of stream `x` for destination
-`a-sender` are both `weave-x-receiver-a-sender`. A write that stores a stream
+`a-sender` are both `connect-x-receiver-a-sender`. A write that stores a stream
 able to plan an id another stream can plan, on any nodes, returns
 `409 hop_id_conflict`. The message names both streams and the detail names the
 id. The stream being replaced, and streams the same stream-set write replaces or
@@ -197,7 +197,7 @@ atomically, creating with `If-None-Match: *` and updating with the current set
 - An empty `streams` list is accepted only with `prune: true`. The empty set
   stays addressable for later conditional writes.
 
-`weave apply-set OWNER -f FILE` applies a YAML file with a required `streams`
+`connect apply-set OWNER -f FILE` applies a YAML file with a required `streams`
 list and an optional `prune`, which defaults to `false`. Unknown fields are
 rejected. The CLI reads the set, then creates it or updates it with its current
 ETag. It does not retry a stale write. See
@@ -213,7 +213,7 @@ any placement reason. It includes `format_policy`, stream conditions and
 per-destination results. Strict format failures return `unplaced` with no
 executable hops or endpoints. Passphrases and TURN credentials are removed from
 the returned hops.
-`weave plan -f FILE` calls it.
+`connect plan -f FILE` calls it.
 
 ## Status and endpoints
 
@@ -264,7 +264,7 @@ for a caller using a node token.
 
 `state` is `resolved`, `not_observed`, `no_uplink` or `no_public_address`. Only
 `resolved` carries `network`, `subnet` and `public`, the mapped addresses in
-ascending order. `weave get nodes` shows the derived network under NETWORKS,
+ascending order. `connect get nodes` shows the derived network under NETWORKS,
 and under SITE `192.168.3.0/24 via 92.244.18.125`, the state of an unresolved
 site, or `-` for a node without one.
 
@@ -276,10 +276,10 @@ registration declares.
 ### Registration
 
 `POST /nodes/register` carries `protocol_version`, which adapters set from
-`weave_core::PROTOCOL_VERSION`:
+`connect_core::PROTOCOL_VERSION`:
 
 ```json
-{ "protocol_version": 12, "node": { "id": "strom-node-1", "...": "..." } }
+{ "protocol_version": 13, "node": { "id": "strom-node-1", "...": "..." } }
 ```
 
 The controller accepts only the version it speaks. Any other value, including an
@@ -330,7 +330,7 @@ nothing once it has registered again.
 
 ```json
 {
-  "id": "weave-cam1-to-studio-sender",
+  "id": "connect-cam1-to-studio-sender",
   "node_id": "strom-node-1",
   "profile_id": "srt-forward",
   "role": "sender",
@@ -350,8 +350,8 @@ carries its `id` and no role or address:
 { "branch_id": "filip", "transport": "output", "id": "macbook-pro-speakers" }
 ```
 
-Hop ids are `weave-{stream}-sender`, `weave-{stream}-receiver-{destination}` and
-`weave-{stream}-bridge-{destination}-{position}`. A hop id is the flow name on
+Hop ids are `connect-{stream}-sender`, `connect-{stream}-receiver-{destination}` and
+`connect-{stream}-bridge-{destination}-{position}`. A hop id is the flow name on
 its node. Each destination id is the `branch_id` on every hop that carries it.
 Reordering destinations in the manifest changes no hop id, port or desired hop.
 
@@ -387,7 +387,7 @@ matched by `branch_id` in any order. A missing, duplicate or unknown branch id
 makes the report incomplete, and the hop stays `pending`, so one healthy branch
 cannot hide another. A hop with a `merge_ingress` reports it in a
 `merge_ingress` field shaped like `ingress`, and is incomplete without it.
-Each report carries `revision`, the lowercase SHA-256 of `open-weave hop` plus
+Each report carries `revision`, the lowercase SHA-256 of `open-connect hop` plus
 a zero byte followed by the hop's JSON with object keys sorted recursively.
 Array order is preserved and JSON has no whitespace. A report for another
 revision cannot confirm the current hop. The Strom adapter leaves the revision

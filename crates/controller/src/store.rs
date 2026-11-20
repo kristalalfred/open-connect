@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use weave_core::logging::ErrorChain;
-use weave_core::{NodeRegistration, StreamDefinition, StreamStatus, protocol_compatible};
+use connect_core::logging::ErrorChain;
+use connect_core::{NodeRegistration, StreamDefinition, StreamStatus, protocol_compatible};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredStream {
@@ -1443,7 +1443,7 @@ impl StateStore for MemStore {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use weave_core::{
+    use connect_core::{
         DeclaredTopology, NodeCapabilities, NodeDescriptor, NodeStatus, SrtEndpoint,
         StreamDestination, StreamTransport,
     };
@@ -1452,7 +1452,7 @@ pub(crate) mod tests {
         StreamDefinition {
             name: name.to_string(),
             enabled: true,
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             allow_cleartext_links: false,
             source: StreamTransport::Srt(SrtEndpoint {
                 node: Some("strom-node-1".to_string()),
@@ -1484,7 +1484,7 @@ pub(crate) mod tests {
 
     fn registration(id: &str) -> NodeRegistration {
         NodeRegistration {
-            protocol_version: weave_core::PROTOCOL_VERSION,
+            protocol_version: connect_core::PROTOCOL_VERSION,
             node: NodeDescriptor {
                 inputs: Vec::new(),
                 outputs: Vec::new(),
@@ -1924,7 +1924,7 @@ pub(crate) mod tests {
         let mut suffix = [0u8; 8];
         getrandom::fill(&mut suffix).unwrap();
         let name = format!(
-            "weave_test_{}",
+            "connect_test_{}",
             suffix
                 .iter()
                 .map(|b| format!("{b:02x}"))
@@ -1990,7 +1990,7 @@ pub(crate) mod tests {
         let cam = loaded.iter().find(|s| s.spec.name == "cam").unwrap();
         assert_eq!(
             cam.spec.source,
-            StreamTransport::Input(weave_core::LocalEndpoint {
+            StreamTransport::Input(connect_core::LocalEndpoint {
                 node: "browser-a1b2".into(),
                 id: "camera".into(),
                 network: None,
@@ -2003,7 +2003,7 @@ pub(crate) mod tests {
         assert_eq!(cam.spec.destinations[0].id, "studio");
         assert_eq!(
             cam.spec.destinations[1].endpoint,
-            StreamTransport::Output(weave_core::LocalEndpoint {
+            StreamTransport::Output(connect_core::LocalEndpoint {
                 node: "browser-c3d4".into(),
                 id: "player".into(),
                 network: Some("internet".into()),
@@ -2045,7 +2045,7 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(changed.source_revision, created.source_revision);
         assert_ne!(changed.revision, created.revision);
-        if let weave_core::StreamTransport::Srt(endpoint) = &mut definition.source {
+        if let connect_core::StreamTransport::Srt(endpoint) = &mut definition.source {
             endpoint.node = Some("replacement".into());
         }
         let replaced = store
@@ -2438,11 +2438,11 @@ pub(crate) mod tests {
     }
     fn status_of(name: &str) -> StreamStatus {
         StreamStatus {
-            format_policy: weave_core::FormatPolicy::Report,
+            format_policy: connect_core::FormatPolicy::Report,
             name: name.to_string(),
             generation: 1,
             observed_generation: Some(1),
-            status: weave_core::PathStatus::Flowing,
+            status: connect_core::PathStatus::Flowing,
             nodes: Vec::new(),
             conditions: Vec::new(),
             ingress: None,
@@ -2481,7 +2481,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let mut flowing = status_of("basic");
-        flowing.status = weave_core::PathStatus::Degraded;
+        flowing.status = connect_core::PathStatus::Degraded;
         store
             .save_stream_statuses(std::slice::from_ref(&flowing))
             .await

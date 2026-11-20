@@ -8,15 +8,15 @@ use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use connect_core::ApiErrorCode;
+use connect_core::logging::ErrorChain;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
-use weave_core::ApiErrorCode;
-use weave_core::logging::ErrorChain;
 
 use crate::store::{LeaseTerm, PgStore};
 use crate::{Controller, error, tick_every};
 
-const FORWARDED: HeaderName = HeaderName::from_static("weave-forwarded");
+const FORWARDED: HeaderName = HeaderName::from_static("connect-forwarded");
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const FORWARD_TIMEOUT: Duration = Duration::from_secs(10);
 const HOP_BY_HOP: [HeaderName; 10] = [

@@ -68,7 +68,7 @@ fn is_srt_element(id: &str, element: &str) -> bool {
     id.starts_with(element) || id.rsplit(':').next() == Some(element)
 }
 
-impl From<&ElementStats> for weave_core::LinkStats {
+impl From<&ElementStats> for connect_core::LinkStats {
     fn from(stats: &ElementStats) -> Self {
         Self {
             connections: stats.connections,

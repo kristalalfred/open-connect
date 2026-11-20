@@ -1,5 +1,5 @@
 [package]
-name = "weave-strom"
+name = "connect-strom"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,7 @@ keywords = ["media", "srt", "webrtc", "streaming", "strom"]
 categories = ["api-bindings", "multimedia::video"]
 
 [dependencies]
-weave-core = { workspace = true }
+connect-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }

@@ -59,7 +59,7 @@ pub const ROUTE_STREAM_SET: &str = "/stream-sets/{owner}";
 pub const ROUTE_STREAM_SETS: &str = "/stream-sets";
 pub const ROUTE_STREAMS: &str = "/streams";
 
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 #[must_use]
 pub fn protocol_compatible(version: u32) -> bool {
@@ -585,7 +585,7 @@ pub fn stream_format_conflicts(stream: &StreamDefinition) -> Vec<media::FormatCo
         .collect()
 }
 
-pub const HOP_ID_PREFIX: &str = "weave-";
+pub const HOP_ID_PREFIX: &str = "connect-";
 
 #[must_use]
 pub fn is_managed_hop_id(name: &str) -> bool {
@@ -627,7 +627,7 @@ impl DesiredHop {
         let mut value = serde_json::to_value(self).expect("desired hops serialize as JSON");
         value.sort_all_objects();
         let mut hash = Sha256::new();
-        hash.update(b"open-weave hop\0");
+        hash.update(b"open-connect hop\0");
         hash.update(serde_json::to_vec(&value).expect("JSON values serialize"));
         format!("{:x}", hash.finalize())
     }
@@ -2529,7 +2529,7 @@ mod tests {
     fn sample_hop() -> DesiredHop {
         DesiredHop {
             delivery: None,
-            id: "weave-contribution-sender".to_string(),
+            id: "connect-contribution-sender".to_string(),
             node_id: "strom-node-1".to_string(),
             profile_id: "srt-forward".to_string(),
             role: HopRole::Sender,
@@ -2591,7 +2591,7 @@ mod tests {
     fn hop_status_round_trips_with_optional_fields_absent() {
         let status = HopStatus {
             delivery: None,
-            id: "weave-contribution-sender".to_string(),
+            id: "connect-contribution-sender".to_string(),
             node_id: "strom-node-1".to_string(),
             revision: String::new(),
             state: HopState::Provisioned,
@@ -2677,7 +2677,7 @@ mod tests {
 
     #[test]
     fn is_managed_hop_id_matches_only_prefixed_names() {
-        assert!(is_managed_hop_id("weave-contribution-sender"));
+        assert!(is_managed_hop_id("connect-contribution-sender"));
         assert!(!is_managed_hop_id("contribution"));
         assert!(!is_managed_hop_id("contribution-recv"));
     }
@@ -2836,7 +2836,7 @@ mod tests {
         });
         let status = HopStatus {
             delivery: None,
-            id: "weave-a".to_string(),
+            id: "connect-a".to_string(),
             node_id: "n1".to_string(),
             revision: desired.revision(),
             state: HopState::Provisioned,
@@ -3389,11 +3389,11 @@ mod tests {
                     SignallingTransport::Whip,
                     SocketRole::Listen,
                     "http://172.26.0.10:8080/whip",
-                    "weave-x",
+                    "connect-x",
                 ),
                 serde_json::json!({
                     "transport": "whip", "role": "listen",
-                    "url": "http://172.26.0.10:8080/whip/weave-x", "endpoint_id": "weave-x"
+                    "url": "http://172.26.0.10:8080/whip/connect-x", "endpoint_id": "connect-x"
                 }),
             ),
             (
@@ -3401,11 +3401,11 @@ mod tests {
                     SignallingTransport::Whep,
                     SocketRole::Connect,
                     "http://172.26.0.10:8080/whep",
-                    "weave-x",
+                    "connect-x",
                 ),
                 serde_json::json!({
                     "transport": "whep", "role": "connect",
-                    "url": "http://172.26.0.10:8080/whep/weave-x", "endpoint_id": "weave-x"
+                    "url": "http://172.26.0.10:8080/whep/connect-x", "endpoint_id": "connect-x"
                 }),
             ),
             (
@@ -3419,22 +3419,22 @@ mod tests {
             (
                 SocketSpec::Webrtc(PeerSocket {
                     attempt: PeerAttempt {
-                        link: PeerLinkId::new("weave-music-receiver-filip"),
+                        link: PeerLinkId::new("connect-music-receiver-filip"),
                         generation: 1_761_300_000,
                     },
                     stun: vec!["stun.example:3478".to_string()],
                     turn: vec![TurnServer {
                         address: "turn.example:3478".to_string(),
-                        username: "1761386400:weave-music-receiver-filip".to_string(),
+                        username: "1761386400:connect-music-receiver-filip".to_string(),
                         credential: TurnCredential::new("c2VjcmV0"),
                     }],
                 }),
                 serde_json::json!({
-                    "transport": "webrtc", "link": "weave-music-receiver-filip",
+                    "transport": "webrtc", "link": "connect-music-receiver-filip",
                     "generation": 1_761_300_000_u32, "stun": ["stun.example:3478"],
                     "turn": [{
                         "address": "turn.example:3478",
-                        "username": "1761386400:weave-music-receiver-filip",
+                        "username": "1761386400:connect-music-receiver-filip",
                         "credential": "c2VjcmV0"
                     }]
                 }),
@@ -3613,10 +3613,10 @@ mod tests {
 
     #[test]
     fn signalling_socket_joins_base_and_endpoint_id() {
-        let trimmed = SignallingSocket::new(SocketRole::Listen, "http://x:8080/whip/", "weave-a");
-        let bare = SignallingSocket::new(SocketRole::Listen, "http://x:8080/whip", "weave-a");
-        assert_eq!(trimmed.url, "http://x:8080/whip/weave-a");
-        assert_eq!(trimmed.endpoint_id, "weave-a");
+        let trimmed = SignallingSocket::new(SocketRole::Listen, "http://x:8080/whip/", "connect-a");
+        let bare = SignallingSocket::new(SocketRole::Listen, "http://x:8080/whip", "connect-a");
+        assert_eq!(trimmed.url, "http://x:8080/whip/connect-a");
+        assert_eq!(trimmed.endpoint_id, "connect-a");
         assert_eq!(
             trimmed, bare,
             "a trailing slash on the base changes nothing"
@@ -3697,7 +3697,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             hop.revision(),
-            "3863eff83ea855efb81128098118c8f26b03294081b15e0b02441ec7a66e516d"
+            "c2156e5a7248e18975d2fa5358265673966af0cadee41033edaf9dee0ce48d29"
         );
     }
 

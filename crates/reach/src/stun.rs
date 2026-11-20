@@ -3,8 +3,8 @@ use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
+use connect_core::ReflexiveAddress;
 use tokio::net::UdpSocket;
-use weave_core::ReflexiveAddress;
 
 const HEADER_LEN: usize = 20;
 const MAGIC_COOKIE: u32 = 0x2112_A442;

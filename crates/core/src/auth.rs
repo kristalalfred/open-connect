@@ -6,17 +6,17 @@ use sha2::Sha256;
 
 use crate::validate_resource_id;
 
-pub const NORTHBOUND_TOKEN_VAR: &str = "WEAVE_NORTHBOUND_TOKEN";
+pub const NORTHBOUND_TOKEN_VAR: &str = "CONNECT_NORTHBOUND_TOKEN";
 
-pub const SOUTHBOUND_TOKEN_VAR: &str = "WEAVE_SOUTHBOUND_TOKEN";
+pub const SOUTHBOUND_TOKEN_VAR: &str = "CONNECT_SOUTHBOUND_TOKEN";
 
-pub const SOUTHBOUND_KEY_VAR: &str = "WEAVE_SOUTHBOUND_KEY";
+pub const SOUTHBOUND_KEY_VAR: &str = "CONNECT_SOUTHBOUND_KEY";
 
 pub const MIN_NODE_KEY_LEN: usize = 32;
 
-pub const SOUTHBOUND_MIN_EPOCHS_VAR: &str = "WEAVE_SOUTHBOUND_MIN_EPOCHS";
+pub const SOUTHBOUND_MIN_EPOCHS_VAR: &str = "CONNECT_SOUTHBOUND_MIN_EPOCHS";
 
-pub const AUTH_DISABLED_VAR: &str = "WEAVE_AUTH_DISABLED";
+pub const AUTH_DISABLED_VAR: &str = "CONNECT_AUTH_DISABLED";
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Token(String);
@@ -277,7 +277,7 @@ pub fn auth_disabled() -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuthError {
     #[error(
-        "{var} is unset or empty: set it, or set WEAVE_AUTH_DISABLED=1 to run without authentication (local development only)"
+        "{var} is unset or empty: set it, or set CONNECT_AUTH_DISABLED=1 to run without authentication (local development only)"
     )]
     MissingToken { var: String },
     #[error(

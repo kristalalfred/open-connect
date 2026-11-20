@@ -1,9 +1,9 @@
-use sha2::{Digest, Sha256};
-use weave_core::{
+use connect_core::{
     DeliveryReport, DeliveryRole, DeliveryState, DesiredHop, HopProfile, HopRole, NodeDescriptor,
     PathStatus, PayloadKind, SocketSpec, StreamCondition, StreamConditionReason,
     StreamConditionStatus, StreamConditionType, StreamDefinition, StreamDestination, TimedHop,
 };
+use sha2::{Digest, Sha256};
 
 use crate::path::PlacementError;
 
@@ -30,7 +30,7 @@ pub fn origin(
         .iter()
         .filter_map(|profile| profile.timed_delivery.as_ref())
         .find(|capability| {
-            capability.protocol == weave_core::delivery::TIMED_PROTOCOL
+            capability.protocol == connect_core::delivery::TIMED_PROTOCOL
                 && capability.roles.contains(&DeliveryRole::Origin)
         })
         .ok_or_else(|| PlacementError::TimedUnsupported {
@@ -66,7 +66,7 @@ pub fn eligible(
             node.capabilities.hop_profiles.retain(|profile| {
                 profile.timed_delivery.as_ref().is_some_and(|capability| {
                     let roles = &capability.roles;
-                    capability.protocol == weave_core::delivery::TIMED_PROTOCOL
+                    capability.protocol == connect_core::delivery::TIMED_PROTOCOL
                         && capability.max_latency_ms >= maximum
                         && ((is_source
                             && roles.contains(&DeliveryRole::Origin)
@@ -100,14 +100,14 @@ pub fn decorate(hop: &mut DesiredHop, origin: &TimedHop, destination: Option<&St
         timing.paths = destination.paths;
     }
     if timing.role != DeliveryRole::Origin {
-        set_payload(&mut hop.ingress, PayloadKind::WeaveTimedV1);
+        set_payload(&mut hop.ingress, PayloadKind::ConnectTimedV1);
         if let Some(merge) = &mut hop.merge_ingress {
-            set_payload(merge, PayloadKind::WeaveTimedV1);
+            set_payload(merge, PayloadKind::ConnectTimedV1);
         }
     }
     if timing.role == DeliveryRole::Forward {
         for egress in &mut hop.egresses {
-            set_payload(&mut egress.socket, PayloadKind::WeaveTimedV1);
+            set_payload(&mut egress.socket, PayloadKind::ConnectTimedV1);
         }
     }
     hop.delivery = Some(timing);
@@ -123,7 +123,7 @@ pub fn profile_matches(hop: &DesiredHop, profile: &HopProfile) -> bool {
     match (&hop.delivery, &profile.timed_delivery) {
         (None, None) => true,
         (Some(timing), Some(capability)) => {
-            capability.protocol == weave_core::delivery::TIMED_PROTOCOL
+            capability.protocol == connect_core::delivery::TIMED_PROTOCOL
                 && capability.roles.contains(&timing.role)
                 && (timing.role == DeliveryRole::Forward
                     || capability.clock_domain == timing.clock_domain)
@@ -157,7 +157,7 @@ pub fn check_budget(
 
 pub fn bind(hops: &mut [DesiredHop], stream: &StreamDefinition, source_revision: u64) {
     let mut hash = Sha256::new();
-    hash.update(b"weave timed source\0");
+    hash.update(b"connect timed source\0");
     hash.update(source_revision.to_be_bytes());
     hash.update(stream.name.as_bytes());
     hash.update(serde_json::to_vec(&stream.source).expect("stream source serializes"));
@@ -294,7 +294,7 @@ pub fn conditions(report: Option<&DeliveryReport>, requested_paths: u8) -> Vec<S
     vec![timing, redundancy]
 }
 
-pub fn aggregate(destinations: &[weave_core::StreamDestinationStatus]) -> Vec<StreamCondition> {
+pub fn aggregate(destinations: &[connect_core::StreamDestinationStatus]) -> Vec<StreamCondition> {
     let mut result = Vec::new();
     for kind in [
         StreamConditionType::TimingReady,

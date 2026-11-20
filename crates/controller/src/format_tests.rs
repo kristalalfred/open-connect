@@ -1,4 +1,4 @@
-use weave_core::{Container, FormatConstraint, FormatPolicy, MediaBehavior, MediaFormat};
+use connect_core::{Container, FormatConstraint, FormatPolicy, MediaBehavior, MediaFormat};
 
 fn declared(name: &str) -> StreamDefinition {
     let mut stream = stream(name);
@@ -12,14 +12,14 @@ fn declared(name: &str) -> StreamDefinition {
     stream
 }
 
-fn source(stream: &mut StreamDefinition) -> &mut weave_core::SrtEndpoint {
+fn source(stream: &mut StreamDefinition) -> &mut connect_core::SrtEndpoint {
     let StreamTransport::Srt(endpoint) = &mut stream.source else {
         unreachable!()
     };
     endpoint
 }
 
-fn destination(stream: &mut StreamDefinition) -> &mut weave_core::SrtEndpoint {
+fn destination(stream: &mut StreamDefinition) -> &mut connect_core::SrtEndpoint {
     let StreamTransport::Srt(endpoint) = &mut stream.destinations[0].endpoint else {
         unreachable!()
     };
