@@ -978,7 +978,7 @@ fn derive_on(
         }
         let branch_id = destination.id.clone();
         let dest = read_endpoint(&destination.endpoint)?;
-        let latency = dest.latency.unwrap_or(DEFAULT_SINK_LATENCY);
+        let latency = link_latency(&dest);
 
         let second_path_relays = if destination.paths > 1 {
             relays.second_path_relays(&stream.name, &destination.id)
@@ -1122,8 +1122,8 @@ fn derive_on(
                 });
                 if destination.paths > 1 {
                     first_paths.push(FirstPath {
-                        destination: destination.id.clone(),
-                        latency,
+                        destination,
+                        timing: destination.delivery.as_ref().and(timing.clone()),
                         sender_attachments: sender_attachments.unwrap_or(attachments.upstream),
                         receiver: receiver.station.clone(),
                         receiver_attachments: attachments.downstream,
@@ -1132,15 +1132,6 @@ fn derive_on(
                             .iter()
                             .map(|bridge| bridge.station.node_id.clone())
                             .collect(),
-                        delivery: destination.delivery.as_ref().and(timing.as_ref()).map(
-                            |origin| {
-                                let mut receiver = origin.clone();
-                                receiver.role = connect_core::DeliveryRole::Receiver;
-                                receiver.policy.clone_from(&destination.delivery);
-                                receiver.paths = destination.paths;
-                                receiver
-                            },
-                        ),
                     });
                 }
                 hops.push(hop);
@@ -1199,7 +1190,7 @@ fn derive_on(
             &mut relays,
         ) {
             single_path.push(SinglePath {
-                destination: first.destination.clone(),
+                destination: first.destination.id.clone(),
                 reason,
             });
         }
@@ -1339,14 +1330,17 @@ fn carries_destination(branch_id: &str, destination: &str) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest == SECOND_PATH_SUFFIX)
 }
 
-struct FirstPath {
-    delivery: Option<connect_core::TimedHop>,
-    destination: String,
-    latency: u32,
+struct FirstPath<'a> {
+    destination: &'a connect_core::StreamDestination,
+    timing: Option<connect_core::TimedHop>,
     sender_attachments: Vec<String>,
     receiver: Station,
     receiver_attachments: Vec<String>,
     relays: Vec<String>,
+}
+
+fn link_latency(destination: &Endpoint) -> u32 {
+    destination.latency.unwrap_or(DEFAULT_SINK_LATENCY)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1360,24 +1354,10 @@ fn place_second_path(
     keys: &LinkKeys,
     relays: &mut RelayCache,
 ) -> Result<(), PlacementError> {
+    let latency = link_latency(&read_endpoint(&first.destination.endpoint)?);
     let eligible;
-    let nodes = if let Some(origin) = &first.delivery {
-        let destination = connect_core::StreamDestination {
-            id: first.destination.clone(),
-            paths: 2,
-            delivery: origin.policy.clone(),
-            endpoint: connect_core::StreamTransport::Srt(connect_core::SrtEndpoint {
-                node: Some(first.receiver.node_id.clone()),
-                remote: None,
-                via: vec![],
-                network: None,
-                latency: Some(first.latency),
-                passphrase: None,
-                format: None,
-                accepts: None,
-            }),
-        };
-        eligible = crate::timed::eligible(nodes, &source.node_id, &destination, origin);
+    let nodes = if let Some(origin) = &first.timing {
+        eligible = crate::timed::eligible(nodes, &source.node_id, first.destination, origin);
         &eligible[..]
     } else {
         nodes
@@ -1393,7 +1373,7 @@ fn place_second_path(
         .hop_profiles
         .iter()
         .any(|profile| {
-            profile.merge && (first.delivery.is_some() || profile.timed_delivery.is_none())
+            profile.merge && (first.timing.is_some() || profile.timed_delivery.is_none())
         })
     {
         return Err(PlacementError::NoMergeProfile {
@@ -1403,7 +1383,7 @@ fn place_second_path(
 
     let mut ports = committed_ports.clone();
     let peers = relays.peers;
-    let branch_id = second_path_branch_id(&first.destination);
+    let branch_id = second_path_branch_id(&first.destination.id);
     let sender = Station {
         avoid: first.sender_attachments.clone(),
         ..source.clone()
@@ -1442,18 +1422,7 @@ fn place_second_path(
             role: HopRole::Bridge,
         })
         .collect();
-    if let Some(timing) = &first.delivery
-        && let Some(policy) = &timing.policy
-    {
-        let configured_ms = (bridges.len() as u64 + 1) * u64::from(first.latency);
-        if configured_ms >= u64::from(policy.maximum_ms().saturating_sub(policy.tolerance_ms())) {
-            return Err(PlacementError::LatencyBudget {
-                destination: first.destination.clone(),
-                configured_ms,
-                budget_ms: policy.maximum_ms(),
-            });
-        }
-    }
+    crate::timed::check_budget(first.destination, bridges.len() + 1, latency)?;
 
     let sender_id = sender_hop_id(stream);
     let mut sender_egresses = Vec::with_capacity(1);
@@ -1464,14 +1433,8 @@ fn place_second_path(
         listen_at: SocketAt::egress(&sender_id, &branch_id),
     };
     for bridge in &bridges {
-        let (up_socket, hop, _) = plan_hop(
-            &upstream,
-            bridge,
-            first.latency,
-            nodes,
-            &mut ports,
-            (keys, peers),
-        )?;
+        let (up_socket, hop, _) =
+            plan_hop(&upstream, bridge, latency, nodes, &mut ports, (keys, peers))?;
         push_egress(&mut sender_egresses, &mut new_hops, &branch_id, up_socket);
         new_hops.push(hop);
         upstream = LinkEnd {
@@ -1480,7 +1443,7 @@ fn place_second_path(
             listen_at: SocketAt::egress(&bridge.id, &branch_id),
         };
     }
-    let receiver_id = receiver_hop_id(stream, &first.destination);
+    let receiver_id = receiver_hop_id(stream, &first.destination.id);
     let merge_id = receiver_hop_id(stream, &branch_id);
     let merge_end = LinkEnd {
         station: &receiver,
@@ -1490,7 +1453,7 @@ fn place_second_path(
     let link = plan_link(
         &upstream,
         &merge_end,
-        first.latency,
+        latency,
         nodes,
         &mut ports,
         (keys, peers),
@@ -1510,7 +1473,7 @@ fn place_second_path(
             hop: receiver_id.clone(),
         })?;
     let mut sender_hop = hops[0].clone();
-    if first.delivery.is_some() {
+    if first.timing.is_some() {
         for egress in &mut sender_egresses {
             crate::timed::set_payload(
                 &mut egress.socket,
@@ -1521,7 +1484,7 @@ fn place_second_path(
     sender_hop.egresses.extend(sender_egresses);
     let mut receiver_hop = hops[receiver_index].clone();
     receiver_hop.merge_ingress = Some(link.downstream);
-    if let Some(timing) = &first.delivery {
+    if let Some(timing) = &first.timing {
         if let Some(socket) = &mut receiver_hop.merge_ingress {
             crate::timed::set_payload(socket, connect_core::PayloadKind::ConnectTimedV1);
         }
