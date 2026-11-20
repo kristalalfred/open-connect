@@ -13,7 +13,7 @@ use crate::transport::{Input, SocketTask};
 pub enum Endpoint {
     Srt(SocketTask),
     RtpInput(Tap),
-    RtpOutput(Output),
+    RtpOutput(Box<Output>),
 }
 
 impl Endpoint {
@@ -47,7 +47,7 @@ impl Endpoint {
             SocketSpec::Local(LocalSocket {
                 end: LocalEnd::Output,
                 id,
-            }) => Self::RtpOutput(settings.rtp.output(id)),
+            }) => Self::RtpOutput(Box::new(settings.rtp.output(id))),
             _ => unreachable!("validated native output"),
         }
     }
@@ -62,14 +62,14 @@ impl Endpoint {
                     end: LocalEnd::Input,
                     id,
                 }),
-            )
-            | (
-                Self::RtpOutput(Output { id: current, .. }),
+            ) => current == id,
+            (
+                Self::RtpOutput(output),
                 SocketSpec::Local(LocalSocket {
                     end: LocalEnd::Output,
                     id,
                 }),
-            ) => current == id,
+            ) => output.id == *id,
             _ => false,
         }
     }
