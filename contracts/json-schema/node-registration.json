@@ -58,6 +58,17 @@
                           ]
                         }
                       },
+                      "modes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "fixed",
+                            "auto",
+                            "low_latency"
+                          ]
+                        }
+                      },
                       "max_latency_ms": {
                         "type": "integer",
                         "format": "uint32",

@@ -1,6 +1,6 @@
 use connect_core::{
-    DeliveryReport, DeliveryRole, DeliveryState, DesiredHop, HopProfile, HopRole, NodeDescriptor,
-    PathStatus, PayloadKind, SocketSpec, StreamCondition, StreamConditionReason,
+    DeliveryPolicy, DeliveryReport, DeliveryRole, DeliveryState, DesiredHop, HopProfile, HopRole,
+    NodeDescriptor, PathStatus, PayloadKind, SocketSpec, StreamCondition, StreamConditionReason,
     StreamConditionStatus, StreamConditionType, StreamDefinition, StreamDestination, TimedHop,
 };
 use sha2::{Digest, Sha256};
@@ -57,6 +57,11 @@ pub fn eligible(
         .delivery
         .as_ref()
         .map_or(0, |policy| policy.maximum_ms());
+    let mode = destination.delivery.as_ref().map(DeliveryPolicy::mode);
+    let clocked = destination
+        .delivery
+        .as_ref()
+        .is_some_and(DeliveryPolicy::is_scheduled);
     nodes
         .iter()
         .cloned()
@@ -73,7 +78,8 @@ pub fn eligible(
                             && capability.clock_domain == origin.clock_domain)
                             || (is_receiver
                                 && roles.contains(&DeliveryRole::Receiver)
-                                && capability.clock_domain == origin.clock_domain)
+                                && mode.is_some_and(|mode| capability.modes.contains(&mode))
+                                && (!clocked || capability.clock_domain == origin.clock_domain))
                             || (!is_source
                                 && !is_receiver
                                 && roles.contains(&DeliveryRole::Forward)))
@@ -97,7 +103,7 @@ pub fn decorate(hop: &mut DesiredHop, origin: &TimedHop, destination: Option<&St
         && let Some(destination) = destination
     {
         timing.policy.clone_from(&destination.delivery);
-        timing.paths = destination.paths;
+        timing.paths = destination.attempted_paths();
     }
     if timing.role != DeliveryRole::Origin {
         set_payload(&mut hop.ingress, PayloadKind::ConnectTimedV1);
@@ -123,14 +129,22 @@ pub fn profile_matches(hop: &DesiredHop, profile: &HopProfile) -> bool {
     match (&hop.delivery, &profile.timed_delivery) {
         (None, None) => true,
         (Some(timing), Some(capability)) => {
+            let clocked = timing
+                .policy
+                .as_ref()
+                .is_none_or(DeliveryPolicy::is_scheduled);
             capability.protocol == connect_core::delivery::TIMED_PROTOCOL
                 && capability.roles.contains(&timing.role)
                 && (timing.role == DeliveryRole::Forward
+                    || !clocked
                     || capability.clock_domain == timing.clock_domain)
                 && timing.policy.as_ref().is_none_or(|policy| {
                     capability.max_latency_ms >= policy.maximum_ms()
-                        && u64::from(capability.scheduling_error_bound_us)
-                            < u64::from(policy.tolerance_ms()) * 1_000
+                        && capability.modes.contains(&policy.mode())
+                        && policy.tolerance_ms().is_none_or(|tolerance| {
+                            u64::from(capability.scheduling_error_bound_us)
+                                < u64::from(tolerance) * 1_000
+                        })
                 })
         }
         _ => false,
@@ -141,16 +155,31 @@ pub fn check_budget(
     destination: &StreamDestination,
     links: usize,
     latency_ms: u32,
+    edges_ms: u32,
 ) -> Result<(), PlacementError> {
-    if let Some(policy) = &destination.delivery {
-        let configured = links as u64 * u64::from(latency_ms);
-        if configured >= u64::from(policy.maximum_ms().saturating_sub(policy.tolerance_ms())) {
-            return Err(PlacementError::LatencyBudget {
-                destination: destination.id.clone(),
-                configured_ms: configured,
-                budget_ms: policy.maximum_ms(),
-            });
+    let Some(policy) = &destination.delivery else {
+        return Ok(());
+    };
+    let links_ms = links as u64 * u64::from(latency_ms);
+    let maximum = u64::from(policy.maximum_ms());
+    let (configured, fits) = match policy.tolerance_ms() {
+        Some(tolerance) => (
+            links_ms,
+            links_ms < maximum.saturating_sub(u64::from(tolerance)),
+        ),
+        None => {
+            let configured = links_ms
+                + u64::from(edges_ms)
+                + u64::from(connect_core::delivery::LOW_LATENCY_MERGE_WAIT_MS);
+            (configured, configured <= maximum)
         }
+    };
+    if !fits {
+        return Err(PlacementError::LatencyBudget {
+            destination: destination.id.clone(),
+            configured_ms: configured,
+            budget_ms: policy.maximum_ms(),
+        });
     }
     Ok(())
 }
@@ -199,14 +228,16 @@ pub fn status(
 }
 
 pub fn effective_report(
+    policy: &DeliveryPolicy,
     receiver: Option<&DeliveryReport>,
     origin: Option<&DeliveryReport>,
 ) -> Option<DeliveryReport> {
     if let Some(origin) = origin.filter(|report| {
-        matches!(
-            report.state,
-            DeliveryState::Degraded | DeliveryState::Failed
-        )
+        policy.is_scheduled()
+            && matches!(
+                report.state,
+                DeliveryState::Degraded | DeliveryState::Failed
+            )
     }) {
         let mut report = receiver.cloned().unwrap_or_default();
         report.state = origin.state;
@@ -218,7 +249,16 @@ pub fn effective_report(
     receiver.cloned()
 }
 
-pub fn conditions(report: Option<&DeliveryReport>, requested_paths: u8) -> Vec<StreamCondition> {
+pub fn conditions(
+    report: Option<&DeliveryReport>,
+    destination: &StreamDestination,
+) -> Vec<StreamCondition> {
+    let requested_paths = destination.paths;
+    let low_latency = destination
+        .delivery
+        .as_ref()
+        .filter(|policy| !policy.is_scheduled())
+        .map(DeliveryPolicy::maximum_ms);
     let mut timing = crate::stream_condition(
         StreamConditionType::TimingReady,
         StreamConditionStatus::Unknown,
@@ -237,9 +277,14 @@ pub fn conditions(report: Option<&DeliveryReport>, requested_paths: u8) -> Vec<S
                 StreamConditionType::TimingReady,
                 StreamConditionStatus::True,
                 StreamConditionReason::TimingReady,
-                format!(
-                    "scheduled release at {} ms",
-                    report.selected_latency_ms.unwrap_or_default()
+                low_latency.map_or_else(
+                    || {
+                        format!(
+                            "scheduled release at {} ms",
+                            report.selected_latency_ms.unwrap_or_default()
+                        )
+                    },
+                    |maximum| format!("first-copy release within {maximum} ms"),
                 ),
             )
         } else if report.state == DeliveryState::Calibrating {
@@ -254,7 +299,11 @@ pub fn conditions(report: Option<&DeliveryReport>, requested_paths: u8) -> Vec<S
                 StreamConditionType::TimingReady,
                 StreamConditionStatus::Unknown,
                 StreamConditionReason::AwaitingInput,
-                "waiting for timely scheduled releases",
+                if low_latency.is_some() {
+                    "waiting for released media"
+                } else {
+                    "waiting for timely scheduled releases"
+                },
             )
         } else {
             crate::stream_condition(
@@ -288,7 +337,13 @@ pub fn conditions(report: Option<&DeliveryReport>, requested_paths: u8) -> Vec<S
             StreamConditionType::RedundancyReady,
             StreamConditionStatus::True,
             StreamConditionReason::NotRequested,
-            "one path requested",
+            match report.filter(|_| destination.attempted_paths() > 1) {
+                Some(report) => format!(
+                    "{} of 2 attempted paths have recent media; one path requested",
+                    report.paths.iter().filter(|path| path.qualified).count()
+                ),
+                None => "one path requested".into(),
+            },
         );
     }
     vec![timing, redundancy]

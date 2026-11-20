@@ -7,8 +7,8 @@ use anyhow::{Context, Result};
 use axum::{Json, Router, routing::get};
 use connect_core::auth::Token;
 use connect_core::{
-    DeliveryCapability, DeliveryRole, DesiredHop, FormatConstraint, HopEndpointClass, HopProfile,
-    HopStatus, LocalEnd, MediaBehavior, NodeCapabilities, NodeConfig, NodeDescriptor,
+    DeliveryCapability, DeliveryMode, DeliveryRole, DesiredHop, FormatConstraint, HopEndpointClass,
+    HopProfile, HopStatus, LocalEnd, MediaBehavior, NodeCapabilities, NodeConfig, NodeDescriptor,
     NodeHeartbeat, NodeRegistration, NodeStatus, PROTOCOL_VERSION, RoleSet, Transport,
     TransportClass,
 };
@@ -114,6 +114,15 @@ pub fn profiles(clock_domain: &str, epoch: u64, scheduling_error_bound_us: u32) 
             timed_delivery: Some(DeliveryCapability {
                 protocol: connect_core::delivery::TIMED_PROTOCOL.into(),
                 roles: vec![role],
+                modes: if role == DeliveryRole::Receiver {
+                    vec![
+                        DeliveryMode::Fixed,
+                        DeliveryMode::Auto,
+                        DeliveryMode::LowLatency,
+                    ]
+                } else {
+                    vec![]
+                },
                 max_latency_ms: 60_000,
                 scheduling_error_bound_us,
                 clock_domain: clock_domain.into(),

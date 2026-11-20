@@ -279,7 +279,7 @@ registration declares.
 `connect_core::PROTOCOL_VERSION`:
 
 ```json
-{ "protocol_version": 13, "node": { "id": "strom-node-1", "...": "..." } }
+{ "protocol_version": 14, "node": { "id": "strom-node-1", "...": "..." } }
 ```
 
 The controller accepts only the version it speaks. Any other value, including an

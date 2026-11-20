@@ -1,7 +1,7 @@
 # Timed delivery and redundant paths
 
-The native `connect-node` runtime implements fixed timed release and automatic
-calibration over encrypted SRT links. Strom and browser nodes do not implement
+The native `connect-node` runtime implements fixed timed release, automatic
+calibration and low-latency first-copy release over encrypted SRT links. Strom and browser nodes do not implement
 these roles. Media stays in the nodes, outside the controller.
 
 ## Contract and manifest
@@ -41,7 +41,7 @@ independently from the same source timestamps.
 
 | Field | Meaning |
 |---|---|
-| `delivery.mode` | Required: `fixed` or `auto`. |
+| `delivery.mode` | Required: `fixed`, `auto` or [`low_latency`](#low-latency). |
 | `latency_ms` | Fixed target, 1 to 60,000 ms. Required in fixed mode. |
 | `tolerance_ms` | Defaults to 5 ms. Positive and less than the target or minimum. |
 | `paths` | Existing desired count, 1 or 2. Defaults to 1. |
@@ -90,6 +90,37 @@ exceeds the ceiling, or too many copies are missing, report
 retry. With one provisioned path and two requested, calibration may select a
 delay for that path, but redundancy remains false. Calibration evidence does
 not guarantee future network conditions or identify the globally optimal delay.
+
+## Low latency
+
+```yaml
+delivery:
+  mode: low_latency
+  max_latency_ms: 150
+```
+
+`low_latency` releases each record as soon as its first copy arrives, in
+sequence order, instead of holding it to a scheduled delay. It needs no clock
+domain. `max_latency_ms` is a ceiling on SRT buffering that open-connect
+configures, from the source's ingress listener to the receiver's consumer
+listener. Propagation delay, encoding and decoding are outside it.
+
+The controller sets the consumer listener to 20 ms, and the ingress listener to
+20 ms unless the source names `srt.latency`. It reserves 10 ms for the receiver
+to wait on a missing record, and splits the rest evenly across each path's
+internal links. A path whose links would get less than 20 ms each is refused
+with `latency_budget_infeasible`. An explicit destination `srt.latency` sets
+every internal link instead and must fit the ceiling.
+
+A `low_latency` destination without `via` always tries a second path, which
+does not require `paths: 2`. With one path it stays `flowing`, and
+`redundancy_ready` names how many attempted paths carry media. `paths: 2` makes
+redundancy required, as for the other modes.
+
+When the next record in sequence is missing, the receiver waits up to 10 ms for
+the other path's copy, then skips it and counts it as unrecovered. A copy that
+arrives after its record was skipped counts as late. Release ages are reported
+only while the origin and receiver share a clock domain.
 
 ## Identity and framing
 
@@ -221,8 +252,9 @@ schedule. Changes that replace sockets or policies can interrupt media.
 
 ## Status and verification
 
-Southbound protocol version is 12. Native profiles advertise separate origin,
-forward and receiver roles; the timed receiver advertises merge support.
+Southbound protocol version is 14. Native profiles advertise separate origin,
+forward and receiver roles; the timed receiver advertises merge support and
+the `modes` it releases.
 Strom rejects timed desired hops; browser profiles advertise none. Rebuild
 nodes and control-plane components together when upgrading.
 

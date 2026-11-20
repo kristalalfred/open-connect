@@ -96,6 +96,24 @@
                               ]
                             }
                           },
+                          "modes": {
+                            "type": "array",
+                            "items": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "fixed",
+                                    "auto",
+                                    "low_latency"
+                                  ]
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            }
+                          },
                           "max_latency_ms": {
                             "type": "integer",
                             "format": "uint32",

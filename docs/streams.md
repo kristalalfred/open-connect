@@ -91,7 +91,8 @@ destinations:
 ```
 
 `paths` is 1 or 2 and defaults to 1. A `remote` destination and one that pins
-`via` cannot ask for two.
+`via` cannot ask for two. A [`low_latency`](timed-delivery.md#low-latency)
+destination tries a second path without asking for it.
 
 The controller places every destination's first path as it would with
 `paths: 1`, then each second path. The second path passes through no relay the first one uses. At the sender and

@@ -1,9 +1,9 @@
 use super::*;
 use connect_core::{
-    DeclaredTopology, DeliveryCapability, DeliveryPathReport, DeliveryPolicy, DeliveryReport,
-    DeliveryRole, DeliveryState, EgressStatus, FormatConstraint, HopEndpointClass, HopProfile,
-    HopState, HopStatus, LinkCondition, MediaBehavior, NodeCapabilities, NodeDescriptor,
-    PayloadKind, RoleSet, SocketStatus, Transport, TransportClass,
+    DeclaredTopology, DeliveryCapability, DeliveryMode, DeliveryPathReport, DeliveryPolicy,
+    DeliveryReport, DeliveryRole, DeliveryState, EgressStatus, FormatConstraint, HopEndpointClass,
+    HopProfile, HopState, HopStatus, LinkCondition, MediaBehavior, NodeCapabilities,
+    NodeDescriptor, PayloadKind, RoleSet, SocketStatus, Transport, TransportClass,
 };
 
 fn node(id: &str, epoch: u64) -> NodeDescriptor {
@@ -39,6 +39,11 @@ fn node(id: &str, epoch: u64) -> NodeDescriptor {
             DeliveryRole::Origin,
             DeliveryRole::Forward,
             DeliveryRole::Receiver,
+        ],
+        modes: vec![
+            DeliveryMode::Fixed,
+            DeliveryMode::Auto,
+            DeliveryMode::LowLatency,
         ],
         max_latency_ms: 60000,
         scheduling_error_bound_us: 1000,
@@ -331,4 +336,112 @@ fn persistence_tracks_timed_readiness_without_writing_every_counter_sample() {
         .unwrap()
         .timing_ready = false;
     assert_ne!(reported(&registration), reported(&changed));
+}
+
+fn low_latency(max_latency_ms: u32) -> StreamDefinition {
+    serde_json::from_value(serde_json::json!({
+        "name":"talk", "source":{"srt":{"node":"source"}},
+        "destinations":[{"id":"studio","delivery":{"mode":"low_latency","max_latency_ms":max_latency_ms},"srt":{"node":"studio"}}]
+    })).unwrap()
+}
+
+fn latency(socket: &connect_core::SocketSpec) -> Option<u32> {
+    match socket {
+        connect_core::SocketSpec::Srt(socket) => socket.params().latency,
+        _ => None,
+    }
+}
+
+#[test]
+fn low_latency_splits_its_budget_across_two_paths_without_requiring_them_or_a_shared_clock() {
+    let mut observed = observed();
+    observed.nodes[1].capabilities.hop_profiles[1]
+        .timed_delivery
+        .as_mut()
+        .unwrap()
+        .clock_domain = "different".into();
+    let outcome = reconcile(vec![low_latency(150)], &observed, &LinkKeys::for_tests());
+    let hops = &outcome.hops_by_stream["talk"];
+    let origin = &hops[0];
+    let receiver = hops
+        .iter()
+        .find(|hop| hop.role == connect_core::HopRole::Receiver)
+        .unwrap();
+    let timing = receiver.delivery.as_ref().unwrap();
+    assert_eq!(timing.paths, 2);
+    assert_eq!(
+        timing.policy,
+        Some(DeliveryPolicy::LowLatency {
+            max_latency_ms: 150
+        })
+    );
+    assert_eq!(latency(&origin.ingress), Some(20));
+    assert_eq!(latency(receiver.merge_ingress.as_ref().unwrap()), Some(100));
+    assert_eq!(latency(&receiver.ingress), Some(100));
+    assert_eq!(latency(&receiver.egresses[0].socket), Some(20));
+    assert!(
+        origin
+            .egresses
+            .iter()
+            .all(|egress| latency(&egress.socket) == Some(100))
+    );
+    assert_eq!(origin.egresses.len(), 2);
+
+    observed.hops = hops.iter().map(report).collect();
+    let flowing = reconcile(vec![low_latency(150)], &observed, &LinkKeys::for_tests());
+    assert_eq!(flowing.streams[0].status, PathStatus::Flowing);
+    let receiver = observed
+        .hops
+        .iter_mut()
+        .find(|hop| hop.delivery.is_some())
+        .unwrap();
+    receiver.delivery.as_mut().unwrap().redundancy_ready = false;
+    receiver.delivery.as_mut().unwrap().paths[1].qualified = false;
+    let one_path = reconcile(vec![low_latency(150)], &observed, &LinkKeys::for_tests());
+    assert_eq!(one_path.streams[0].status, PathStatus::Flowing);
+    let redundancy = one_path.streams[0].destinations[0]
+        .conditions
+        .iter()
+        .find(|condition| condition.condition_type == StreamConditionType::RedundancyReady)
+        .unwrap();
+    assert_eq!(redundancy.status, StreamConditionStatus::True);
+    assert!(redundancy.detail.starts_with("1 of 2 attempted paths"));
+}
+
+#[test]
+fn low_latency_places_one_path_when_a_second_cannot_be_kept_apart() {
+    let mut observed = observed();
+    observed.nodes[1].topology.attachments.truncate(1);
+    let outcome = reconcile(vec![low_latency(150)], &observed, &LinkKeys::for_tests());
+    let receiver = &outcome.hops_by_stream["talk"][1];
+    assert!(receiver.merge_ingress.is_none());
+    assert_eq!(receiver.delivery.as_ref().unwrap().paths, 2);
+    assert_eq!(
+        outcome.streams[0].conditions[0].reason,
+        StreamConditionReason::SinglePath
+    );
+}
+
+#[test]
+fn low_latency_refuses_budgets_without_room_and_receivers_without_the_mode() {
+    let outcome = reconcile(vec![low_latency(60)], &observed(), &LinkKeys::for_tests());
+    assert_eq!(outcome.streams[0].status, PathStatus::Pending);
+    assert_eq!(
+        outcome.streams[0].conditions[0].reason,
+        StreamConditionReason::LatencyBudgetInfeasible
+    );
+
+    let mut observed = observed();
+    observed.nodes[1].capabilities.hop_profiles[1]
+        .timed_delivery
+        .as_mut()
+        .unwrap()
+        .modes
+        .retain(|mode| *mode != DeliveryMode::LowLatency);
+    let outcome = reconcile(vec![low_latency(150)], &observed, &LinkKeys::for_tests());
+    assert_eq!(outcome.streams[0].status, PathStatus::Pending);
+    assert_eq!(
+        outcome.streams[0].conditions[0].reason,
+        StreamConditionReason::TimedDeliveryUnsupported
+    );
 }

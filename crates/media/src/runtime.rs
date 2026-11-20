@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 
 use crate::clock::Clock;
 use crate::endpoint::Endpoint;
+use crate::first_copy::{FirstCopy, UNKNOWN_UNCERTAINTY_NS};
 use crate::merge::{BufferLimits, Merger};
 use crate::record::{MAX_PAYLOAD, Record};
 use crate::rtp::Rtp;
@@ -157,7 +158,12 @@ fn validate(desired: &DesiredHop, settings: &Settings) -> anyhow::Result<()> {
             "timed outputs require encryption"
         );
         anyhow::ensure!(
-            timing.role == DeliveryRole::Forward || timing.clock_domain == clock.domain(),
+            timing.role == DeliveryRole::Forward
+                || timing
+                    .policy
+                    .as_ref()
+                    .is_some_and(|policy| !policy.is_scheduled())
+                || timing.clock_domain == clock.domain(),
             "timed hop clock domain does not match the node"
         );
         anyhow::ensure!(
@@ -198,12 +204,47 @@ fn validate(desired: &DesiredHop, settings: &Settings) -> anyhow::Result<()> {
     Ok(())
 }
 
+enum Receiver {
+    Scheduled(Merger),
+    FirstCopy(FirstCopy),
+}
+
+impl Receiver {
+    fn reset_path(&mut self, path: usize) {
+        match self {
+            Self::Scheduled(merger) => merger.reset_path(path),
+            Self::FirstCopy(receiver) => receiver.reset_path(path),
+        }
+    }
+
+    fn next_deadline_ns(&self) -> Option<u64> {
+        match self {
+            Self::Scheduled(merger) => merger.next_deadline_ns(),
+            Self::FirstCopy(receiver) => receiver.next_deadline_ns(),
+        }
+    }
+
+    fn transport_dropped(&mut self, count: u64) {
+        match self {
+            Self::Scheduled(merger) => merger.transport_dropped(count),
+            Self::FirstCopy(receiver) => receiver.transport_dropped(count),
+        }
+    }
+
+    fn report(&self, now_ns: u64) -> DeliveryReport {
+        match self {
+            Self::Scheduled(merger) => merger.report(now_ns),
+            Self::FirstCopy(receiver) => receiver.report(now_ns),
+        }
+    }
+}
+
 struct Actor {
     settings: Settings,
     desired: DesiredHop,
     inputs: BTreeMap<usize, Endpoint>,
     outputs: BTreeMap<String, Endpoint>,
-    merger: Option<Merger>,
+    receiver: Option<Receiver>,
     origin: Arc<Mutex<OriginState>>,
     origin_report: DeliveryReport,
 }
@@ -221,7 +262,7 @@ impl Actor {
             .as_ref()
             .map(|timing| (timing.delivery_id, timing.epoch));
         if old_identity != new_identity {
-            self.merger = None;
+            self.receiver = None;
             self.origin_report = DeliveryReport::default();
         }
         let count = 1 + usize::from(desired.merge_ingress.is_some());
@@ -231,18 +272,30 @@ impl Actor {
             .filter(|timing| timing.role == DeliveryRole::Receiver)
         {
             let policy = timing.policy.clone().unwrap();
-            if let Some(merger) = &mut self.merger {
-                merger.reconfigure(policy, count, usize::from(timing.paths));
-            } else {
-                self.merger = Some(Merger::new(
-                    policy,
-                    count,
-                    usize::from(timing.paths),
-                    limits,
-                ));
+            let requested = usize::from(timing.paths);
+            match (&mut self.receiver, policy.is_scheduled()) {
+                (Some(Receiver::Scheduled(merger)), true) => {
+                    merger.reconfigure(policy, count, requested);
+                }
+                (Some(Receiver::FirstCopy(receiver)), false) => {
+                    receiver.reconfigure(count, requested);
+                }
+                (_, true) => {
+                    self.receiver = Some(Receiver::Scheduled(Merger::new(
+                        policy, count, requested, limits,
+                    )));
+                }
+                (_, false) => {
+                    self.receiver = Some(Receiver::FirstCopy(FirstCopy::new(
+                        connect_core::delivery::LOW_LATENCY_MERGE_WAIT_MS,
+                        count,
+                        requested,
+                        limits,
+                    )));
+                }
             }
         } else {
-            self.merger = None;
+            self.receiver = None;
         }
         self.inputs.retain(|path, _| *path < count);
         for (path, spec) in std::iter::once(&desired.ingress)
@@ -259,8 +312,8 @@ impl Actor {
                     path,
                     Endpoint::input(spec, path, incoming.clone(), &self.settings),
                 );
-                if let Some(merger) = &mut self.merger {
-                    merger.reset_path(path);
+                if let Some(receiver) = &mut self.receiver {
+                    receiver.reset_path(path);
                 }
             }
         }
@@ -311,23 +364,20 @@ impl Actor {
                             .previous_origin_ns
                             .is_none_or(|previous| stamp.tai_ns >= previous) =>
                     {
-                        stamp
+                        origin.previous_origin_ns = Some(stamp.tai_ns);
+                        self.origin_report.state = DeliveryState::Ready;
+                        self.origin_report.reason = DeliveryReason::Timely;
+                        self.origin_report.clock_uncertainty_us =
+                            Some(stamp.uncertainty_ns.div_ceil(1_000));
+                        Some(stamp)
                     }
                     failed => {
-                        let reason = failed.err().unwrap_or(DeliveryReason::ClockDiscontinuity);
                         self.origin_report.state = DeliveryState::Degraded;
-                        self.origin_report.reason = reason;
-                        for output in self
-                            .outputs
-                            .values()
-                            .filter(|output| output.payload() == PayloadKind::Raw)
-                        {
-                            let _ = output.try_send(input.bytes.clone(), clock.monotonic_ns());
-                        }
-                        return;
+                        self.origin_report.reason =
+                            failed.err().unwrap_or(DeliveryReason::ClockDiscontinuity);
+                        None
                     }
                 };
-                origin.previous_origin_ns = Some(stamp.tai_ns);
                 for output in self
                     .outputs
                     .values()
@@ -344,8 +394,9 @@ impl Actor {
                         delivery_id: timing.delivery_id,
                         epoch: timing.epoch,
                         sequence: origin.sequence,
-                        origin_tai_ns: stamp.tai_ns,
-                        origin_uncertainty_ns: stamp.uncertainty_ns,
+                        origin_tai_ns: stamp.map_or(0, |stamp| stamp.tai_ns),
+                        origin_uncertainty_ns: stamp
+                            .map_or(UNKNOWN_UNCERTAINTY_NS, |stamp| stamp.uncertainty_ns),
                         payload: Bytes::copy_from_slice(chunk),
                     };
                     origin.sequence = next;
@@ -358,10 +409,6 @@ impl Actor {
                         let _ = output.try_send(encoded.clone(), clock.monotonic_ns());
                     }
                 }
-                self.origin_report.state = DeliveryState::Ready;
-                self.origin_report.reason = DeliveryReason::Timely;
-                self.origin_report.clock_uncertainty_us =
-                    Some(stamp.uncertainty_ns.div_ceil(1_000));
             }
             DeliveryRole::Forward => {
                 if Record::decode(input.bytes.clone(), timing.delivery_id, timing.epoch).is_err() {
@@ -373,14 +420,25 @@ impl Actor {
                 }
             }
             DeliveryRole::Receiver => {
-                let merger = self.merger.as_mut().unwrap();
-                match (
-                    Record::decode(input.bytes, timing.delivery_id, timing.epoch),
-                    input.stamp,
-                ) {
-                    (Ok(record), Ok(stamp)) => merger.ingest(record, input.path, stamp),
-                    (_, Err(reason)) => merger.suspend(reason, clock.monotonic_ns()),
-                    (Err(_), _) => merger.invalid_record(),
+                let record = Record::decode(input.bytes, timing.delivery_id, timing.epoch);
+                match self.receiver.as_mut().unwrap() {
+                    Receiver::Scheduled(merger) => match (record, input.stamp) {
+                        (Ok(record), Ok(stamp)) => merger.ingest(record, input.path, stamp),
+                        (_, Err(reason)) => merger.suspend(reason, clock.monotonic_ns()),
+                        (Err(_), _) => merger.invalid_record(),
+                    },
+                    Receiver::FirstCopy(receiver) => match record {
+                        Ok(record) => receiver.ingest(
+                            record,
+                            input.path,
+                            clock.monotonic_ns(),
+                            input
+                                .stamp
+                                .ok()
+                                .filter(|_| timing.clock_domain == clock.domain()),
+                        ),
+                        Err(_) => receiver.invalid_record(),
+                    },
                 }
             }
         }
@@ -399,8 +457,18 @@ impl Actor {
             self.origin_report.reason = reason;
             self.origin_report.clock_uncertainty_us = None;
         }
-        let Some(merger) = &mut self.merger else {
-            return;
+        let merger = match &mut self.receiver {
+            None => return,
+            Some(Receiver::FirstCopy(receiver)) => {
+                let shared_clock = self
+                    .desired
+                    .delivery
+                    .as_ref()
+                    .is_some_and(|timing| timing.clock_domain == clock.domain());
+                Self::release_first_copies(receiver, &self.outputs, clock, shared_clock).await;
+                return;
+            }
+            Some(Receiver::Scheduled(merger)) => merger,
         };
         let sample = match clock.sample() {
             Ok(sample) => sample,
@@ -454,6 +522,36 @@ impl Actor {
         }
     }
 
+    async fn release_first_copies(
+        receiver: &mut FirstCopy,
+        outputs: &BTreeMap<String, Endpoint>,
+        clock: &Clock,
+        shared_clock: bool,
+    ) {
+        let mut submitted = 0;
+        while let Some(record) = receiver.take_ready(clock.monotonic_ns()) {
+            let now_ns = clock.monotonic_ns();
+            let mut result = Ok(());
+            for output in outputs.values() {
+                if let Err(reason) = output.try_send(record.payload.clone(), now_ns) {
+                    result = Err(reason);
+                }
+            }
+            match result {
+                Ok(()) => receiver.released(
+                    &record,
+                    clock.monotonic_ns(),
+                    clock.sample().ok().filter(|_| shared_clock),
+                ),
+                Err(reason) => receiver.output_failed(reason, now_ns),
+            }
+            submitted += 1;
+            if submitted % 32 == 0 {
+                tokio::task::yield_now().await;
+            }
+        }
+    }
+
     fn report(&mut self, now_ns: u64) -> HopStatus {
         let drops = self
             .inputs
@@ -461,8 +559,8 @@ impl Actor {
             .chain(self.outputs.values())
             .map(Endpoint::take_drops)
             .fold(0_u64, u64::saturating_add);
-        if let Some(merger) = &mut self.merger {
-            merger.transport_dropped(drops);
+        if let Some(receiver) = &mut self.receiver {
+            receiver.transport_dropped(drops);
         } else {
             self.origin_report.counters.buffer_drops = self
                 .origin_report
@@ -499,9 +597,9 @@ impl Actor {
                 })
                 .collect(),
             delivery: self.desired.delivery.as_ref().map(|_| {
-                self.merger.as_ref().map_or_else(
+                self.receiver.as_ref().map_or_else(
                     || self.origin_report.clone(),
-                    |merger| merger.report(now_ns),
+                    |receiver| receiver.report(now_ns),
                 )
             }),
         }
@@ -521,7 +619,7 @@ async fn run(
         desired: desired.clone(),
         inputs: BTreeMap::new(),
         outputs: BTreeMap::new(),
-        merger: None,
+        receiver: None,
         origin,
         origin_report: DeliveryReport::default(),
     };
@@ -532,9 +630,9 @@ async fn run(
     loop {
         let now_ns = clock.monotonic_ns();
         let wait_ns = actor
-            .merger
+            .receiver
             .as_ref()
-            .and_then(Merger::next_deadline_ns)
+            .and_then(Receiver::next_deadline_ns)
             .map_or(100_000_000, |deadline| deadline.saturating_sub(now_ns))
             .min(100_000_000);
         tokio::select! {
@@ -771,6 +869,62 @@ mod tests {
         assert!(report.counters.duplicates > 0);
         assert!(report.minimum_release_age_us.unwrap() >= 180_000);
         assert!(report.maximum_release_age_us.unwrap() <= 220_000);
+    }
+
+    #[tokio::test]
+    async fn low_latency_media_takes_the_fast_path_and_falls_back_to_the_slow_one_without_a_gap() {
+        let _network = NETWORK.lock().await;
+        let ports = ports();
+        let clock = Clock::new(ClockConfig::SharedHost {
+            domain: "test".into(),
+            tai_offset_secs: 37,
+        });
+        let (source, receiver) = pair(
+            DeliveryPolicy::LowLatency {
+                max_latency_ms: 150,
+            },
+            ports,
+        );
+        let mut origin = Hop::start(source.clone(), settings(&clock), Arc::default()).unwrap();
+        let receiver = Hop::start(receiver, settings(&clock), Arc::default()).unwrap();
+        let (mut producer, mut consumer) = peers(ports).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let sending = async {
+            for sequence in 0..200_u64 {
+                if sequence == 100 {
+                    let mut changed = source.clone();
+                    changed.egresses.remove(0);
+                    origin.update(changed, &settings(&clock)).unwrap();
+                }
+                producer
+                    .send((
+                        std::time::Instant::now(),
+                        Bytes::copy_from_slice(&sequence.to_be_bytes()),
+                    ))
+                    .await
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        let receiving = async {
+            for expected in 0..200_u64 {
+                let (_, payload) = tokio::time::timeout(Duration::from_secs(4), consumer.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(payload.as_ref(), &expected.to_be_bytes());
+            }
+        };
+        tokio::join!(sending, receiving);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let report = receiver.report.lock().unwrap().delivery.clone().unwrap();
+        assert_eq!(report.counters.released, 200);
+        assert_eq!(report.counters.unrecovered, 0);
+        assert!(report.counters.duplicates > 0);
+        assert!(report.minimum_release_age_us.unwrap() < 60_000);
+        assert!(report.maximum_release_age_us.unwrap() >= 100_000);
+        assert!(report.timing_ready);
     }
 
     #[tokio::test]

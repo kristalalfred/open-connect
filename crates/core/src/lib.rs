@@ -20,8 +20,8 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
 pub use delivery::{
-    DeliveryCapability, DeliveryCounters, DeliveryPathReport, DeliveryPolicy, DeliveryReason,
-    DeliveryReport, DeliveryRole, DeliveryState, PayloadKind, TimedHop,
+    DeliveryCapability, DeliveryCounters, DeliveryMode, DeliveryPathReport, DeliveryPolicy,
+    DeliveryReason, DeliveryReport, DeliveryRole, DeliveryState, PayloadKind, TimedHop,
 };
 
 pub use api::{
@@ -59,7 +59,7 @@ pub const ROUTE_STREAM_SET: &str = "/stream-sets/{owner}";
 pub const ROUTE_STREAM_SETS: &str = "/stream-sets";
 pub const ROUTE_STREAMS: &str = "/streams";
 
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 #[must_use]
 pub fn protocol_compatible(version: u32) -> bool {
@@ -399,6 +399,26 @@ fn one_path() -> u8 {
 
 fn is_one_path(paths: &u8) -> bool {
     *paths == 1
+}
+
+impl StreamDestination {
+    #[must_use]
+    pub fn is_low_latency(&self) -> bool {
+        self.delivery
+            .as_ref()
+            .is_some_and(|policy| policy.mode() == DeliveryMode::LowLatency)
+    }
+
+    #[must_use]
+    pub fn attempted_paths(&self) -> u8 {
+        let pinned =
+            matches!(&self.endpoint, StreamTransport::Srt(endpoint) if !endpoint.via.is_empty());
+        if self.is_low_latency() && !pinned {
+            2
+        } else {
+            self.paths
+        }
+    }
 }
 
 impl Deref for StreamDestination {

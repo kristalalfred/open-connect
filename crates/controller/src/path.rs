@@ -17,6 +17,8 @@ use crate::peers::{MissingTurn, PeerFailure, PeerPlanning};
 const DEFAULT_SRC_LATENCY: u32 = 200;
 const DEFAULT_SINK_LATENCY: u32 = 1000;
 const RECV_CONSUMER_LATENCY: u32 = 200;
+const LOW_LATENCY_EDGE_MS: u32 = 20;
+const LOW_LATENCY_LINK_FLOOR_MS: u32 = 20;
 
 const SRT_PBKEYLEN: u8 = 32;
 
@@ -464,7 +466,7 @@ impl HopReports {
         for destination in stream
             .destinations
             .iter()
-            .filter(|destination| destination.paths > 1)
+            .filter(|destination| destination.attempted_paths() > 1)
         {
             let branch = second_path_branch_id(&destination.id);
             let bridges = bridge_hop_id_prefix(&stream.name, &branch);
@@ -796,7 +798,7 @@ fn hop_id_forms(stream: &StreamDefinition) -> Vec<HopIdForm> {
             &stream.name,
             &destination.id,
         )));
-        if destination.paths > 1 {
+        if destination.attempted_paths() > 1 {
             forms.push(HopIdForm::Bridge(bridge_hop_id_prefix(
                 &stream.name,
                 &second_path_branch_id(&destination.id),
@@ -941,6 +943,7 @@ fn derive_on(
 
     let sender_node = source_node(&source)?;
     let timing = crate::timed::origin(stream, nodes)?;
+    let ingress_ms = ingress_latency(stream, &source);
     let sender_id = sender_hop_id(&stream.name);
     let source_station = Station {
         node_id: sender_node.to_string(),
@@ -978,9 +981,8 @@ fn derive_on(
         }
         let branch_id = destination.id.clone();
         let dest = read_endpoint(&destination.endpoint)?;
-        let latency = link_latency(&dest);
 
-        let second_path_relays = if destination.paths > 1 {
+        let second_path_relays = if destination.attempted_paths() > 1 {
             relays.second_path_relays(&stream.name, &destination.id)
         } else {
             Vec::new()
@@ -996,7 +998,7 @@ fn derive_on(
             &second_path_relays,
         )?;
         peer_routes.extend(chain.peer_routes.iter().cloned());
-        crate::timed::check_budget(destination, chain.bridges.len() + 1, latency)?;
+        let latency = link_latency(destination, &dest, chain.bridges.len() + 1, ingress_ms)?;
 
         let mut hops: Vec<DesiredHop> = Vec::with_capacity(chain.bridges.len() + 1);
         let mut upstream = LinkEnd {
@@ -1059,7 +1061,7 @@ fn derive_on(
                     params: srt_params(latency, dest.passphrase.cloned()),
                 });
                 push_egress(&mut sender_egresses, &mut hops, &branch_id, socket);
-                if destination.paths > 1 {
+                if destination.attempted_paths() > 1 {
                     single_path.push(SinglePath {
                         destination: destination.id.clone(),
                         reason: PlacementError::NoMergeReceiver,
@@ -1090,7 +1092,10 @@ fn derive_on(
                         )?;
                         SocketSpec::Srt(SrtSocket::Listen {
                             port,
-                            params: srt_params(RECV_CONSUMER_LATENCY, dest.passphrase.cloned()),
+                            params: srt_params(
+                                consumer_latency(destination),
+                                dest.passphrase.cloned(),
+                            ),
                         })
                     }
                     Terminal::Local(LocalEnd::Output, id) => {
@@ -1120,9 +1125,10 @@ fn derive_on(
                     branch_id: branch_id.clone(),
                     socket,
                 });
-                if destination.paths > 1 {
+                if destination.attempted_paths() > 1 {
                     first_paths.push(FirstPath {
                         destination,
+                        ingress_ms,
                         timing: destination.delivery.as_ref().and(timing.clone()),
                         sender_attachments: sender_attachments.unwrap_or(attachments.upstream),
                         receiver: receiver.station.clone(),
@@ -1163,7 +1169,13 @@ fn derive_on(
         node_id: sender_node.to_string(),
         profile_id: String::new(),
         role: HopRole::Sender,
-        ingress: source_socket(&source, sender_node, &sender_id, nodes, &mut ports)?,
+        ingress: source_socket(
+            &source,
+            ingress_ms,
+            (sender_node, &sender_id),
+            nodes,
+            &mut ports,
+        )?,
         merge_ingress: None,
         egresses: sender_egresses,
         tracks: None,
@@ -1332,6 +1344,7 @@ fn carries_destination(branch_id: &str, destination: &str) -> bool {
 
 struct FirstPath<'a> {
     destination: &'a connect_core::StreamDestination,
+    ingress_ms: u32,
     timing: Option<connect_core::TimedHop>,
     sender_attachments: Vec<String>,
     receiver: Station,
@@ -1339,8 +1352,54 @@ struct FirstPath<'a> {
     relays: Vec<String>,
 }
 
-fn link_latency(destination: &Endpoint) -> u32 {
-    destination.latency.unwrap_or(DEFAULT_SINK_LATENCY)
+fn ingress_latency(stream: &StreamDefinition, source: &Endpoint) -> u32 {
+    source.latency.unwrap_or(
+        if stream
+            .destinations
+            .iter()
+            .any(connect_core::StreamDestination::is_low_latency)
+        {
+            LOW_LATENCY_EDGE_MS
+        } else {
+            DEFAULT_SRC_LATENCY
+        },
+    )
+}
+
+fn consumer_latency(destination: &connect_core::StreamDestination) -> u32 {
+    if destination.is_low_latency() {
+        LOW_LATENCY_EDGE_MS
+    } else {
+        RECV_CONSUMER_LATENCY
+    }
+}
+
+fn link_latency(
+    destination: &connect_core::StreamDestination,
+    endpoint: &Endpoint,
+    links: usize,
+    ingress_ms: u32,
+) -> Result<u32, PlacementError> {
+    let edges_ms = ingress_ms + consumer_latency(destination);
+    let latency = match (endpoint.latency, &destination.delivery) {
+        (Some(latency), _) => latency,
+        (None, Some(connect_core::DeliveryPolicy::LowLatency { max_latency_ms })) => {
+            let reserved_ms = edges_ms + connect_core::delivery::LOW_LATENCY_MERGE_WAIT_MS;
+            let latency = max_latency_ms.saturating_sub(reserved_ms) / links as u32;
+            if latency < LOW_LATENCY_LINK_FLOOR_MS {
+                return Err(PlacementError::LatencyBudget {
+                    destination: destination.id.clone(),
+                    configured_ms: u64::from(reserved_ms)
+                        + links as u64 * u64::from(LOW_LATENCY_LINK_FLOOR_MS),
+                    budget_ms: *max_latency_ms,
+                });
+            }
+            latency
+        }
+        (None, _) => DEFAULT_SINK_LATENCY,
+    };
+    crate::timed::check_budget(destination, links, latency, edges_ms)?;
+    Ok(latency)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1354,7 +1413,6 @@ fn place_second_path(
     keys: &LinkKeys,
     relays: &mut RelayCache,
 ) -> Result<(), PlacementError> {
-    let latency = link_latency(&read_endpoint(&first.destination.endpoint)?);
     let eligible;
     let nodes = if let Some(origin) = &first.timing {
         eligible = crate::timed::eligible(nodes, &source.node_id, first.destination, origin);
@@ -1422,7 +1480,12 @@ fn place_second_path(
             role: HopRole::Bridge,
         })
         .collect();
-    crate::timed::check_budget(first.destination, bridges.len() + 1, latency)?;
+    let latency = link_latency(
+        first.destination,
+        &read_endpoint(&first.destination.endpoint)?,
+        bridges.len() + 1,
+        first.ingress_ms,
+    )?;
 
     let sender_id = sender_hop_id(stream);
     let mut sender_egresses = Vec::with_capacity(1);
@@ -2535,14 +2598,13 @@ fn source_node<'a>(source: &Endpoint<'a>) -> Result<&'a str, PlacementError> {
 
 fn source_socket(
     source: &Endpoint,
-    node_id: &str,
-    hop_id: &str,
+    latency: u32,
+    (node_id, hop_id): (&str, &str),
     nodes: &[NodeDescriptor],
     ports: &mut PortAllocator,
 ) -> Result<SocketSpec, PlacementError> {
     match source.terminal {
         Terminal::Srt => {
-            let latency = source.latency.unwrap_or(DEFAULT_SRC_LATENCY);
             let port = claim_port(
                 node_id,
                 source.network,

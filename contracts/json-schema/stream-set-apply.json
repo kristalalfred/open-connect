@@ -1206,6 +1206,26 @@
                             "min_latency_ms",
                             "max_latency_ms"
                           ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "max_latency_ms": {
+                              "type": "integer",
+                              "format": "uint32",
+                              "minimum": 1,
+                              "maximum": 60000
+                            },
+                            "mode": {
+                              "type": "string",
+                              "const": "low_latency"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "required": [
+                            "mode",
+                            "max_latency_ms"
+                          ]
                         }
                       ]
                     },

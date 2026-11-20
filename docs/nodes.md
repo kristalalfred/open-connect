@@ -36,7 +36,7 @@ capabilities:
 | `max_egresses` | Optional limit on egresses per hop. |
 | `accepts` | Optional. The media the ingress takes, in the shape of a destination's [`accepts`](streams.md#formats). |
 | `media_behavior` | `preserve` or `unknown` (default). Never inferred from transport or profile id. |
-| `timed_delivery` | Optional protocol, roles, latency limit, scheduling bound, clock domain and origin epoch. See [Timed delivery](timed-delivery.md). |
+| `timed_delivery` | Optional protocol, roles, the delivery `modes` a receiver releases, latency limit, scheduling bound, clock domain and origin epoch. See [Timed delivery](timed-delivery.md). |
 | `merge` | Optional. The hop takes a second ingress of the `ingress` class, `merge_ingress`, and merges two [paths](streams.md#redundant-paths). |
 
 `preserve` declares that the complete application media payload, including

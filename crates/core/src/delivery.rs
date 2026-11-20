@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const TIMED_PROTOCOL: &str = "connect_timed_v1";
+pub const LOW_LATENCY_MERGE_WAIT_MS: u32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
@@ -31,6 +32,18 @@ pub enum DeliveryPolicy {
         #[schemars(range(max = 59999))]
         margin_ms: u32,
     },
+    LowLatency {
+        #[schemars(range(min = 1, max = 60000))]
+        max_latency_ms: u32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryMode {
+    Fixed,
+    Auto,
+    LowLatency,
 }
 
 fn default_tolerance() -> u32 {
@@ -51,18 +64,37 @@ fn default_margin() -> u32 {
 
 impl DeliveryPolicy {
     #[must_use]
-    pub fn maximum_ms(&self) -> u32 {
+    pub fn mode(&self) -> DeliveryMode {
         match self {
-            Self::Fixed { latency_ms, .. } => *latency_ms,
-            Self::Auto { max_latency_ms, .. } => *max_latency_ms,
+            Self::Fixed { .. } => DeliveryMode::Fixed,
+            Self::Auto { .. } => DeliveryMode::Auto,
+            Self::LowLatency { .. } => DeliveryMode::LowLatency,
         }
     }
 
     #[must_use]
-    pub fn tolerance_ms(&self) -> u32 {
+    pub fn maximum_ms(&self) -> u32 {
         match self {
-            Self::Fixed { tolerance_ms, .. } | Self::Auto { tolerance_ms, .. } => *tolerance_ms,
+            Self::Fixed { latency_ms, .. } => *latency_ms,
+            Self::Auto { max_latency_ms, .. } | Self::LowLatency { max_latency_ms } => {
+                *max_latency_ms
+            }
         }
+    }
+
+    #[must_use]
+    pub fn tolerance_ms(&self) -> Option<u32> {
+        match self {
+            Self::Fixed { tolerance_ms, .. } | Self::Auto { tolerance_ms, .. } => {
+                Some(*tolerance_ms)
+            }
+            Self::LowLatency { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_scheduled(&self) -> bool {
+        self.tolerance_ms().is_some()
     }
 
     #[must_use]
@@ -73,12 +105,15 @@ impl DeliveryPolicy {
             issues.push((
                 match self {
                     Self::Fixed { .. } => "latency_ms",
-                    Self::Auto { .. } => "max_latency_ms",
+                    Self::Auto { .. } | Self::LowLatency { .. } => "max_latency_ms",
                 },
                 "latency must be between 1 and 60000 ms",
             ));
         }
-        if self.tolerance_ms() == 0 || self.tolerance_ms() >= maximum {
+        if self
+            .tolerance_ms()
+            .is_some_and(|tolerance| tolerance == 0 || tolerance >= maximum)
+        {
             issues.push((
                 "tolerance_ms",
                 "tolerance must be positive and less than the latency",
@@ -93,7 +128,11 @@ impl DeliveryPolicy {
             ..
         } = self
         {
-            if *min_latency_ms <= self.tolerance_ms() || min_latency_ms > max_latency_ms {
+            if self
+                .tolerance_ms()
+                .is_some_and(|tolerance| *min_latency_ms <= tolerance)
+                || min_latency_ms > max_latency_ms
+            {
                 issues.push((
                     "min_latency_ms",
                     "minimum must exceed the tolerance and not exceed the maximum",
@@ -132,6 +171,8 @@ pub enum DeliveryRole {
 pub struct DeliveryCapability {
     pub protocol: String,
     pub roles: Vec<DeliveryRole>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modes: Vec<DeliveryMode>,
     pub max_latency_ms: u32,
     pub scheduling_error_bound_us: u32,
     pub clock_domain: String,

@@ -121,7 +121,7 @@ pub fn validate_stream(stream: &StreamDefinition) -> Vec<ValidationIssue> {
                 issues.push(ValidationIssue::new(
                     format!("{path}.delivery"),
                     "not_allowed",
-                    "timed delivery requires managed SRT source and destination endpoints",
+                    "delivery requires managed SRT source and destination endpoints",
                 ));
             }
         }

@@ -2820,7 +2820,7 @@ fn reconcile_with_revisions(
                                 .iter()
                                 .filter(|shortfall| shortfall.destination == destination.id),
                         );
-                        let delivery = destination.delivery.as_ref().and_then(|_| {
+                        let delivery = destination.delivery.as_ref().and_then(|policy| {
                             let receiver = path.hops.iter().find(|hop| {
                                 hop.id == path::receiver_hop_id(&stream.name, &destination.id)
                             })?;
@@ -2835,7 +2835,11 @@ fn reconcile_with_revisions(
                                     timing.role == connect_core::DeliveryRole::Origin
                                 })
                             });
-                            timed::effective_report(current(receiver), origin.and_then(current))
+                            timed::effective_report(
+                                policy,
+                                current(receiver),
+                                origin.and_then(current),
+                            )
                         });
                         let mut conditions = placed_conditions(
                             compatibility.for_stream(&destination_stream),
@@ -2851,8 +2855,7 @@ fn reconcile_with_revisions(
                             .as_deref(),
                         );
                         let status = if destination.delivery.is_some() {
-                            conditions
-                                .extend(timed::conditions(delivery.as_ref(), destination.paths));
+                            conditions.extend(timed::conditions(delivery.as_ref(), destination));
                             timed::status(status, delivery.as_ref(), destination.paths)
                         } else {
                             status

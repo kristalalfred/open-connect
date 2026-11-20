@@ -114,9 +114,10 @@ impl Merger {
         limits: BufferLimits,
     ) -> Self {
         assert!((1..=2).contains(&input_paths));
+        assert!(policy.is_scheduled());
         let selected_latency_ms = match policy {
             DeliveryPolicy::Fixed { latency_ms, .. } => Some(latency_ms),
-            DeliveryPolicy::Auto { .. } => None,
+            DeliveryPolicy::Auto { .. } | DeliveryPolicy::LowLatency { .. } => None,
         };
         Self {
             policy,
@@ -138,6 +139,10 @@ impl Merger {
                 ..DeliveryReport::default()
             },
         }
+    }
+
+    fn tolerance_ns(&self) -> u64 {
+        u64::from(self.policy.tolerance_ms().unwrap_or_default()) * NS_PER_MS
     }
 
     fn uncertainty_ns(&self, record: &Record, clock: ClockSample) -> u64 {
@@ -174,7 +179,7 @@ impl Merger {
         self.report.clock_uncertainty_us = Some(clock.uncertainty_ns.div_ceil(1_000));
         self.report.paths[path].received += 1;
         let uncertainty = self.uncertainty_ns(&record, clock);
-        if uncertainty > u64::from(self.policy.tolerance_ms()) * NS_PER_MS {
+        if uncertainty > self.tolerance_ns() {
             self.violate(DeliveryReason::ClockUncertaintyExceeded, clock.monotonic_ns);
             return;
         }
@@ -190,7 +195,7 @@ impl Merger {
             return;
         }
         let budget_ns = u64::from(self.report.selected_latency_ms.unwrap()) * NS_PER_MS;
-        let tolerance_ns = u64::from(self.policy.tolerance_ms()) * NS_PER_MS;
+        let tolerance_ns = self.tolerance_ns();
         if age_ns.saturating_add(uncertainty) > budget_ns.saturating_add(tolerance_ns) {
             self.report.paths[path].late += 1;
             self.report.counters.late_arrivals += 1;
@@ -406,7 +411,7 @@ impl Merger {
             }
             self.watermark = Some(sequence);
             let budget_ns = u64::from(self.report.selected_latency_ms.unwrap()) * NS_PER_MS;
-            let tolerance_ns = u64::from(self.policy.tolerance_ms()) * NS_PER_MS;
+            let tolerance_ns = self.tolerance_ns();
             let age_ns = clock.tai_ns.saturating_sub(pending.record.origin_tai_ns);
             let error_ns = self.uncertainty_ns(&pending.record, clock);
             let lateness_ns = clock
@@ -438,7 +443,7 @@ impl Merger {
         );
         self.last_release_ns = Some(clock.monotonic_ns);
         let budget_ns = u64::from(self.report.selected_latency_ms.unwrap()) * NS_PER_MS;
-        let tolerance_ns = u64::from(self.policy.tolerance_ms()) * NS_PER_MS;
+        let tolerance_ns = self.tolerance_ns();
         let error_ns = self.uncertainty_ns(record, clock);
         let age_ns = clock.tai_ns.saturating_sub(record.origin_tai_ns);
         if age_ns.saturating_add(error_ns) > budget_ns.saturating_add(tolerance_ns)
