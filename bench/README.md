@@ -234,6 +234,7 @@ The dashboard is <http://127.0.0.1:39083/ui>. This leaves the Compose bench alon
 just timed-demo status
 just timed-demo auto
 just timed-demo fixed
+just timed-demo low-latency
 just timed-demo fail both
 just timed-demo restore a
 just timed-demo restore b
@@ -242,7 +243,8 @@ just timed-demo stop
 ```
 
 Fixed mode targets 500 ms. Auto measures each input and locks a target between
-80 and 500 ms. Calibration temporarily suspends output. `fail` accepts `a`, `b`
+80 and 500 ms. Low latency releases first copies within a 200 ms SRT budget and
+drops the demo's explicit SRT latencies so the controller splits the budget. Calibration temporarily suspends output. `fail` accepts `a`, `b`
 or `both` and defaults to `a`. Paths stay paused until restored; `--seconds 15`
 restores them automatically after 15 seconds. `restore` accepts the same paths
 and defaults to both. With both paths paused, decoding stops. Restoring either

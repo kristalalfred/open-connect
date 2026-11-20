@@ -17,6 +17,8 @@ use tokio::task::JoinHandle;
 
 const API: &str = "http://127.0.0.1:39082";
 const STREAM: &str = "timed-demo";
+const SOURCE_LATENCY_MS: u64 = 120;
+const LINK_LATENCY_MS: u64 = 60;
 
 #[derive(Parser)]
 #[command(
@@ -38,6 +40,8 @@ enum Action {
     Fixed,
     #[command(about = "Calibrate and lock delivery latency")]
     Auto,
+    #[command(about = "Release first copies within a 200 ms SRT budget")]
+    LowLatency,
     #[command(about = "Pause relay paths until restored or the optional timeout expires")]
     Fail {
         #[arg(value_enum, default_value_t = RelayTarget::A, help = "Relay paths to pause")]
@@ -240,15 +244,36 @@ async fn wait(client: &Client, path: &str, ready: impl Fn(&Value) -> bool) -> Re
     }
 }
 
-fn policy(automatic: bool) -> Value {
-    if automatic {
-        json!({"mode":"auto","min_latency_ms":80,"max_latency_ms":500,"tolerance_ms":10})
-    } else {
-        json!({"mode":"fixed","latency_ms":500,"tolerance_ms":10})
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Fixed,
+    Auto,
+    LowLatency,
+}
+
+fn policy(mode: Mode) -> Value {
+    match mode {
+        Mode::Auto => {
+            json!({"mode":"auto","min_latency_ms":80,"max_latency_ms":500,"tolerance_ms":10})
+        }
+        Mode::Fixed => json!({"mode":"fixed","latency_ms":500,"tolerance_ms":10}),
+        Mode::LowLatency => json!({"mode":"low_latency","max_latency_ms":200}),
     }
 }
 
-async fn change_policy(client: &Client, automatic: bool) -> Result<()> {
+fn set_latency(endpoint: &mut Value, latency: Option<u64>) {
+    match (endpoint.as_object_mut(), latency) {
+        (Some(endpoint), Some(latency)) => {
+            endpoint.insert("latency".into(), latency.into());
+        }
+        (Some(endpoint), None) => {
+            endpoint.remove("latency");
+        }
+        (None, _) => {}
+    }
+}
+
+async fn change_policy(client: &Client, mode: Mode) -> Result<()> {
     let response = client
         .get(format!("{API}/streams/{STREAM}"))
         .send()
@@ -260,7 +285,17 @@ async fn change_policy(client: &Client, automatic: bool) -> Result<()> {
         .context("stream has no ETag")?
         .clone();
     let mut resource: Value = response.json().await?;
-    resource["spec"]["destinations"][0]["delivery"] = policy(automatic);
+    let spec = &mut resource["spec"];
+    spec["destinations"][0]["delivery"] = policy(mode);
+    let scheduled = mode != Mode::LowLatency;
+    set_latency(
+        &mut spec["source"]["srt"],
+        scheduled.then_some(SOURCE_LATENCY_MS),
+    );
+    set_latency(
+        &mut spec["destinations"][0]["srt"],
+        scheduled.then_some(LINK_LATENCY_MS),
+    );
     client
         .post(format!("{API}/streams"))
         .header(reqwest::header::IF_MATCH, etag)
@@ -274,10 +309,10 @@ async fn change_policy(client: &Client, automatic: bool) -> Result<()> {
     )?;
     println!(
         "Applied {} delivery policy",
-        if automatic {
-            "automatic calibration"
-        } else {
-            "fixed 500 ms"
+        match mode {
+            Mode::Auto => "automatic calibration",
+            Mode::Fixed => "fixed 500 ms",
+            Mode::LowLatency => "low-latency 200 ms",
         }
     );
     Ok(())
@@ -325,44 +360,59 @@ async fn peers(source: &Value, destination: &Value) -> Result<Vec<JoinHandle<()>
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     };
-    let mut producer = connect(source_address).await?;
-    let mut consumer = connect(destination_address).await?;
-    let mut producer_stats = producer.statistics().clone();
-    let mut consumer_stats = consumer.statistics().clone();
-    let statistics = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                Some(stats) = producer_stats.next() => {
-                    let _ = std::fs::write(root().join("producer-srt.log"), format!("{stats:#?}"));
-                },
-                Some(stats) = consumer_stats.next() => {
-                    let _ = std::fs::write(root().join("consumer-srt.log"), format!("{stats:#?}"));
-                },
-                else => return,
-            }
-        }
-    });
     let input = UdpSocket::bind("127.0.0.1:39092").await?;
     let output = UdpSocket::bind("127.0.0.1:0").await?;
+    let mut producer = connect(source_address.clone()).await?;
+    let mut consumer = connect(destination_address.clone()).await?;
     let sending = tokio::spawn(async move {
         let mut packet = [0_u8; 65_536];
-        while let Ok(length) = input.recv(&mut packet).await {
-            if producer
-                .send((Instant::now(), Bytes::copy_from_slice(&packet[..length])))
-                .await
-                .is_err()
-            {
-                return;
+        loop {
+            let mut statistics = producer.statistics().clone();
+            loop {
+                tokio::select! {
+                    Some(stats) = statistics.next() => {
+                        let _ = std::fs::write(root().join("producer-srt.log"), format!("{stats:#?}"));
+                    }
+                    received = input.recv(&mut packet) => {
+                        let Ok(length) = received else { return };
+                        if producer
+                            .send((Instant::now(), Bytes::copy_from_slice(&packet[..length])))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
             }
+            let Ok(socket) = connect(source_address.clone()).await else {
+                return;
+            };
+            producer = socket;
         }
     });
     let receiving = tokio::spawn(async move {
-        while let Some(Ok((_, payload))) = consumer.next().await {
-            let _ = output.send_to(&payload, "127.0.0.1:39093").await;
-            let _ = output.send_to(&payload, "127.0.0.1:39094").await;
+        loop {
+            let mut statistics = consumer.statistics().clone();
+            loop {
+                tokio::select! {
+                    Some(stats) = statistics.next() => {
+                        let _ = std::fs::write(root().join("consumer-srt.log"), format!("{stats:#?}"));
+                    }
+                    item = consumer.next() => {
+                        let Some(Ok((_, payload))) = item else { break };
+                        let _ = output.send_to(&payload, "127.0.0.1:39093").await;
+                        let _ = output.send_to(&payload, "127.0.0.1:39094").await;
+                    }
+                }
+            }
+            let Ok(socket) = connect(destination_address.clone()).await else {
+                return;
+            };
+            consumer = socket;
         }
     });
-    Ok(vec![sending, receiving, statistics])
+    Ok(vec![sending, receiving])
 }
 
 async fn run(client: &Client) -> Result<()> {
@@ -458,7 +508,7 @@ async fn run(client: &Client) -> Result<()> {
     })
     .await?;
     let media_format = json!({"container":"mpeg_ts","video":{"codec":"h264","width":640,"height":360,"framerate":{"numerator":25,"denominator":1},"chroma_subsampling":"yuv420"},"audio":{"codec":"aac","sample_rate":48000,"channels":1}});
-    let manifest = json!({"name":STREAM,"format_policy":"strict","source":{"srt":{"node":"source","latency":120,"format":media_format}},"destinations":[{"id":"studio","paths":2,"delivery":policy(false),"srt":{"node":"studio","latency":60,"accepts":{"container":["mpeg_ts"],"video":{"codec":["h264"]},"audio":{"codec":["aac"],"sample_rate":[48000],"channels":[1]}}}}]});
+    let manifest = json!({"name":STREAM,"format_policy":"strict","source":{"srt":{"node":"source","latency":SOURCE_LATENCY_MS,"format":media_format}},"destinations":[{"id":"studio","paths":2,"delivery":policy(Mode::Fixed),"srt":{"node":"studio","latency":LINK_LATENCY_MS,"accepts":{"container":["mpeg_ts"],"video":{"codec":["h264"]},"audio":{"codec":["aac"],"sample_rate":[48000],"channels":[1]}}}}]});
     std::fs::write(
         root.join("stream.yaml"),
         serde_norway::to_string(&manifest)?,
@@ -546,7 +596,7 @@ async fn run(client: &Client) -> Result<()> {
     )?;
     println!("Timed media demo: http://127.0.0.1:39083/ui");
     println!(
-        "Commands: just timed-demo status | auto | fixed | fail [a|b|both] | restore [a|b|both] | view | stop"
+        "Commands: just timed-demo status | auto | fixed | low-latency | fail [a|b|both] | restore [a|b|both] | view | stop"
     );
     println!(
         "The demo uses one shared host clock. Decoder and display latency are outside the managed timing boundary."
@@ -589,8 +639,9 @@ async fn main() -> Result<()> {
             result = run(&client) => result,
             result = connect_core::shutdown::signal() => result.context("waiting for demo shutdown"),
         },
-        Action::Auto => change_policy(&client, true).await,
-        Action::Fixed => change_policy(&client, false).await,
+        Action::Auto => change_policy(&client, Mode::Auto).await,
+        Action::Fixed => change_policy(&client, Mode::Fixed).await,
+        Action::LowLatency => change_policy(&client, Mode::LowLatency).await,
         Action::Status => {
             println!(
                 "{}",
