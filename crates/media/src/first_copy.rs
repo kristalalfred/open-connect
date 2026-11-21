@@ -106,8 +106,13 @@ impl Alignment {
         self.skew_ns().unwrap_or(0).min(self.max_skew_ns)
     }
 
-    fn offset_ns(&self, path: usize) -> u64 {
+    fn offset_ns(&self, path: usize, now_ns: u64) -> u64 {
+        let settling = self.resumed_ns[path]
+            .is_some_and(|resumed| now_ns.saturating_sub(resumed) < SKEW_WINDOW_NS);
+        let other_live = self.last_seen_ns[1 - path]
+            .is_some_and(|seen| now_ns.saturating_sub(seen) < SKEW_IDLE_NS);
         match self.lag_ns {
+            Some(_) if settling && other_live => self.hold_ns(),
             Some(lag) if (lag > 0 && path == 0) || (lag < 0 && path == 1) => self.hold_ns(),
             _ => 0,
         }
@@ -221,7 +226,7 @@ impl FirstCopy {
         let due_ns = now_ns.saturating_add(
             self.alignment
                 .as_ref()
-                .map_or(0, |alignment| alignment.offset_ns(path)),
+                .map_or(0, |alignment| alignment.offset_ns(path, now_ns)),
         );
         let report = &mut self.report.paths[path];
         report.received += 1;
@@ -476,6 +481,7 @@ mod tests {
         lag_ms: [u64; 2],
         down: [std::ops::Range<u64>; 2],
         backlog: u64,
+        rush: Option<(usize, std::ops::Range<u64>, u64)>,
     }
 
     fn run_aligned(receiver: &mut FirstCopy, links: &Links, records: u64) -> BTreeMap<u64, u64> {
@@ -492,7 +498,18 @@ mod tests {
                         receiver.ingest(record(old), path, now * MS, None);
                     }
                 }
-                if sequence < records && !down.contains(&sequence) {
+                let rushed = |sequence: u64| {
+                    links.rush.as_ref().is_some_and(|(rushed, range, _)| {
+                        *rushed == path && range.contains(&sequence)
+                    })
+                };
+                if sequence < records && !down.contains(&sequence) && !rushed(sequence) {
+                    receiver.ingest(record(sequence), path, now * MS, None);
+                }
+                if let Some((_, _, early_ms)) = &links.rush
+                    && let Some(sequence) = (now + early_ms).checked_sub(links.lag_ms[path])
+                    && rushed(sequence)
+                {
                     receiver.ingest(record(sequence), path, now * MS, None);
                 }
             }
@@ -510,6 +527,7 @@ mod tests {
             lag_ms: [5, 45],
             down: [400..600, 0..0],
             backlog: 0,
+            rush: None,
         };
         let released = run_aligned(&mut receiver, &links, 1_000);
         for sequence in 200..1_000 {
@@ -528,12 +546,33 @@ mod tests {
     }
 
     #[test]
+    fn a_returning_slower_path_that_briefly_runs_fast_releases_nothing_early() {
+        let mut receiver = FirstCopy::new(10, Some(80), 2, 2, BufferLimits::default());
+        let links = Links {
+            lag_ms: [5, 45],
+            down: [0..0, 400..1_400],
+            backlog: 0,
+            rush: Some((1, 1_400..1_410, 25)),
+        };
+        let released = run_aligned(&mut receiver, &links, 2_000);
+        for sequence in 200..2_000 {
+            assert_eq!(
+                released.get(&sequence),
+                Some(&(sequence + 45)),
+                "record {sequence}"
+            );
+        }
+        assert_eq!(receiver.report(2_000 * MS).counters.unrecovered, 0);
+    }
+
+    #[test]
     fn aligned_release_holds_whichever_path_is_faster_and_survives_losing_the_slower_one() {
         let mut receiver = FirstCopy::new(10, Some(80), 2, 2, BufferLimits::default());
         let links = Links {
             lag_ms: [30, 0],
             down: [400..600, 0..0],
             backlog: 0,
+            rush: None,
         };
         let released = run_aligned(&mut receiver, &links, 1_000);
         for sequence in 200..1_000 {
@@ -549,6 +588,7 @@ mod tests {
             lag_ms: [30, 0],
             down: [0..0, 400..600],
             backlog: 0,
+            rush: None,
         };
         let released = run_aligned(&mut receiver, &links, 1_000);
         for sequence in 200..1_000 {
@@ -568,6 +608,7 @@ mod tests {
             lag_ms: [5, 45],
             down: [400..1_000, 0..0],
             backlog: 600,
+            rush: None,
         };
         let released = run_aligned(&mut receiver, &links, 2_000);
         for sequence in 200..2_000 {
@@ -589,6 +630,7 @@ mod tests {
             lag_ms: [0, 120],
             down: [0..0, 0..0],
             backlog: 0,
+            rush: None,
         };
         let released = run_aligned(&mut receiver, &links, 1_000);
         assert_eq!(released.get(&500), Some(&580));
@@ -606,6 +648,7 @@ mod tests {
             lag_ms: [5, 45],
             down: [0..0, 0..0],
             backlog: 0,
+            rush: None,
         };
         let released = run_aligned(&mut receiver, &links, 300);
         assert_eq!(released.get(&200), Some(&205));

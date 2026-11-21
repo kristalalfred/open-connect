@@ -149,7 +149,9 @@ Until both paths have delivered enough records, nothing is held. When the hold
 first applies, output pauses once by the measured skew. While a path is down,
 the last measured skew stays in force. When a path resumes after 500 ms without
 records, measurements are ignored for one second so that its backlog does not
-count as path delay. When the skew exceeds `max_skew_ms`, the
+count as path delay. During that second, while the other path delivers, the
+resumed path's copies are held like the faster path's, so a reconnecting path
+that briefly runs fast releases nothing early. When the skew exceeds `max_skew_ms`, the
 receiver holds `max_skew_ms`, a failover pauses by the remainder, and
 `redundancy_ready` is false with reason `skew_exceeded`. `max_skew_ms` is
 separate from `max_latency_ms`, which bounds configured SRT buffering only.
