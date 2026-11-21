@@ -292,7 +292,8 @@
                                 "output_unavailable",
                                 "output_backpressure",
                                 "buffer_exhausted",
-                                "latency_budget_infeasible"
+                                "latency_budget_infeasible",
+                                "skew_exceeded"
                               ]
                             },
                             {
@@ -341,6 +342,30 @@
                           "minimum": 0
                         },
                         "maximum_release_age_us": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "format": "uint64",
+                          "minimum": 0
+                        },
+                        "latest_release_age_us": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "format": "uint64",
+                          "minimum": 0
+                        },
+                        "skew_us": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "format": "uint64",
+                          "minimum": 0
+                        },
+                        "hold_us": {
                           "type": [
                             "integer",
                             "null"

@@ -250,7 +250,7 @@ struct Actor {
 }
 
 impl Actor {
-    fn configure(&mut self, desired: DesiredHop, incoming: &mpsc::Sender<Input>) {
+    fn configure(&mut self, desired: DesiredHop, incoming: &[mpsc::Sender<Input>; 2]) {
         let limits = self.settings.limits;
         let old_identity = self
             .desired
@@ -278,7 +278,7 @@ impl Actor {
                     merger.reconfigure(policy, count, requested);
                 }
                 (Some(Receiver::FirstCopy(receiver)), false) => {
-                    receiver.reconfigure(count, requested);
+                    receiver.reconfigure(policy.max_skew_ms(), count, requested);
                 }
                 (_, true) => {
                     self.receiver = Some(Receiver::Scheduled(Merger::new(
@@ -288,6 +288,7 @@ impl Actor {
                 (_, false) => {
                     self.receiver = Some(Receiver::FirstCopy(FirstCopy::new(
                         connect_core::delivery::LOW_LATENCY_MERGE_WAIT_MS,
+                        policy.max_skew_ms(),
                         count,
                         requested,
                         limits,
@@ -310,7 +311,7 @@ impl Actor {
                 self.inputs.remove(&path);
                 self.inputs.insert(
                     path,
-                    Endpoint::input(spec, path, incoming.clone(), &self.settings),
+                    Endpoint::input(spec, path, incoming[path].clone(), &self.settings),
                 );
                 if let Some(receiver) = &mut self.receiver {
                     receiver.reset_path(path);
@@ -623,7 +624,11 @@ async fn run(
         origin,
         origin_report: DeliveryReport::default(),
     };
-    let (incoming, mut receive) = mpsc::channel(256);
+    let (first, first_receive) = mpsc::channel(256);
+    let (second, second_receive) = mpsc::channel(256);
+    let incoming = [first, second];
+    let mut receive = [first_receive, second_receive];
+    let mut turn = 0;
     actor.configure(desired, &incoming);
     let mut publish = tokio::time::interval(Duration::from_millis(100));
     publish.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -644,9 +649,25 @@ async fn run(
             }
             _ = tokio::time::sleep(Duration::from_nanos(wait_ns)) => actor.release().await,
             _ = publish.tick() => { actor.release().await; *report.lock().unwrap() = actor.report(clock.monotonic_ns()); }
-            Some(input) = receive.recv() => { actor.accept(input); actor.release().await; tokio::task::yield_now().await; }
+            Some(input) = next_input(&mut receive, &mut turn) => { actor.accept(input); actor.release().await; tokio::task::yield_now().await; }
         }
     }
+}
+
+fn next_input<'a>(
+    receivers: &'a mut [mpsc::Receiver<Input>; 2],
+    turn: &'a mut usize,
+) -> impl std::future::Future<Output = Option<Input>> + 'a {
+    std::future::poll_fn(move |context| {
+        for offset in 0..2 {
+            let path = (*turn + offset) % 2;
+            if let std::task::Poll::Ready(Some(input)) = receivers[path].poll_recv(context) {
+                *turn = (path + 1) % 2;
+                return std::task::Poll::Ready(Some(input));
+            }
+        }
+        std::task::Poll::Pending
+    })
 }
 
 #[cfg(test)]
@@ -872,7 +893,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn low_latency_media_takes_the_fast_path_and_falls_back_to_the_slow_one_without_a_gap() {
+    async fn low_latency_media_takes_the_fast_path_and_falls_back_to_the_slow_one_without_losing_a_record()
+     {
         let _network = NETWORK.lock().await;
         let ports = ports();
         let clock = Clock::new(ClockConfig::SharedHost {
@@ -882,6 +904,7 @@ mod tests {
         let (source, receiver) = pair(
             DeliveryPolicy::LowLatency {
                 max_latency_ms: 150,
+                max_skew_ms: None,
             },
             ports,
         );
@@ -925,6 +948,94 @@ mod tests {
         assert!(report.minimum_release_age_us.unwrap() < 60_000);
         assert!(report.maximum_release_age_us.unwrap() >= 100_000);
         assert!(report.timing_ready);
+    }
+
+    #[tokio::test]
+    async fn a_burst_on_one_input_path_does_not_queue_the_other_behind_it() {
+        let (first, first_receive) = mpsc::channel(256);
+        let (second, second_receive) = mpsc::channel(256);
+        let mut receivers = [first_receive, second_receive];
+        let input = |path| Input {
+            path,
+            bytes: Bytes::new(),
+            stamp: Err(DeliveryReason::ClockUnavailable),
+        };
+        for _ in 0..200 {
+            first.try_send(input(0)).unwrap();
+        }
+        second.try_send(input(1)).unwrap();
+        let mut turn = 0;
+        let mut order = Vec::new();
+        for _ in 0..3 {
+            order.push(next_input(&mut receivers, &mut turn).await.unwrap().path);
+        }
+        assert_eq!(order, vec![0, 1, 0]);
+    }
+
+    #[tokio::test]
+    async fn aligned_low_latency_media_keeps_its_pace_when_the_fast_path_is_removed() {
+        let _network = NETWORK.lock().await;
+        let ports = ports();
+        let clock = Clock::new(ClockConfig::SharedHost {
+            domain: "test".into(),
+            tai_offset_secs: 37,
+        });
+        let (source, receiver) = pair(
+            DeliveryPolicy::LowLatency {
+                max_latency_ms: 150,
+                max_skew_ms: Some(150),
+            },
+            ports,
+        );
+        let mut origin = Hop::start(source.clone(), settings(&clock), Arc::default()).unwrap();
+        let receiver = Hop::start(receiver, settings(&clock), Arc::default()).unwrap();
+        let (mut producer, mut consumer) = peers(ports).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let sending = async {
+            for sequence in 0..300_u64 {
+                if sequence == 200 {
+                    let mut changed = source.clone();
+                    changed.egresses.remove(0);
+                    origin.update(changed, &settings(&clock)).unwrap();
+                }
+                producer
+                    .send((
+                        std::time::Instant::now(),
+                        Bytes::copy_from_slice(&sequence.to_be_bytes()),
+                    ))
+                    .await
+                    .unwrap();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        let receiving = async {
+            let mut arrivals = Vec::new();
+            for expected in 0..300_u64 {
+                let (_, payload) = tokio::time::timeout(Duration::from_secs(4), consumer.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(payload.as_ref(), &expected.to_be_bytes());
+                arrivals.push(std::time::Instant::now());
+            }
+            arrivals
+        };
+        let ((), arrivals) = tokio::join!(sending, receiving);
+        let gap = arrivals[100..]
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .max()
+            .unwrap();
+        assert!(gap < Duration::from_millis(40), "largest gap {gap:?}");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let report = receiver.report.lock().unwrap().delivery.clone().unwrap();
+        assert_eq!(report.counters.unrecovered, 0);
+        assert!(
+            report.hold_us.unwrap() >= 60_000,
+            "hold {:?}",
+            report.hold_us
+        );
     }
 
     #[tokio::test]

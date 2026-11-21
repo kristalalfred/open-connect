@@ -1,0 +1,11 @@
+name: aligned
+source:
+  srt: { node: native-node-3 }
+destinations:
+  - id: studio
+    paths: 2
+    delivery:
+      mode: low_latency
+      max_latency_ms: 300
+      max_skew_ms: 150
+    srt: { node: native-node-4 }

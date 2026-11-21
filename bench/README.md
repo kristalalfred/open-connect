@@ -1,7 +1,13 @@
 # Media bench
 
-Docker Compose runs two controllers behind an nginx edge, Postgres and four
-Strom 0.6.10 nodes behind routers with `netem`. The stack starts without streams.
+Docker Compose runs two controllers behind an nginx edge, Postgres, and four
+Strom 0.6.10 nodes and four native `connect-node` nodes behind routers with
+`netem`. Each router's site holds one of each. The native nodes share the
+bench VM's clock as domain `shared-host:bench` and use their own networks:
+`native-node-1` and `native-node-2` relay on networks `native-a` and
+`native-b`, and `native-node-3` and `native-node-4` take ingress and serve
+output behind the NAT sites, dialing both relays. Strom streams cannot route
+through them. The stack starts without streams.
 
 Requires Docker with Compose v2, Rust, `just`, `jq`, `curl`, `bash` and Python 3.
 Run recipes from the repository root:
@@ -77,6 +83,7 @@ Cases use these actions:
 | `flows` | Require running hop counts in `nodes`; omitted nodes must have zero. |
 | `observe` | Watch `receivers` for at least `seconds`; also watch until every `during` action finishes. |
 | `service` | `stop`, `start`, `restart`, `kill`, `pause`, or `unpause` a bench control service, Postgres, adapter, or Strom; `leader` selects the current controller leader. `start` and `restart` wait until the container runs and passes its healthcheck. |
+| `delivery` | Wait up to `timeout_secs` until `stream`/`destination`'s receiver report has `redundancy_ready` and a `hold_ms: [minimum, maximum]`; `mark` saves the report. With `since: <mark>`, fail at once if more than `max_new_unrecovered` records went unrecovered, the maximum release age grew more than `max_age_growth_ms`, or the latest release age moved more than `max_age_shift_ms` since that mark. |
 | `netem`, `clear_netem` | Apply individual `tc` tokens in `args`, or clear them, on `node1` through `node4`. |
 | `snapshot`, `unchanged` | Capture a stream's ETag, generation, and runtime flow identities with `as_name`; compare using `snapshot`. |
 | `delete` | Remove endpoints and the stream; wait for its managed flows to disappear. |
@@ -86,7 +93,7 @@ Copy an existing case and change its steps to add a test. `schema` prints the
 JSON Schema for the case format. `check` validates cases and their manifests
 without needing Docker. Unknown actions and fields are errors.
 
-A run requires the bench services to be running, all four media nodes ready,
+A run requires the bench services to be running, all eight media nodes ready,
 no streams or managed flows, and no existing router impairment. Runs are
 serialized with `bench/.e2e.lock`. The runner removes its streams and endpoint
 containers, clears its impairments, and starts services it touched after
@@ -203,6 +210,7 @@ The bench enables authentication with development credentials:
 | `CONNECT_NORTHBOUND_TOKEN` | `bench-northbound-token` | both controllers, CLI, `endpoints.sh` |
 | `CONNECT_SOUTHBOUND_KEY` | `bench-southbound-key-for-local-use-only` | both controllers, `just bench node-token` |
 | `CONNECT_ADAPTER_{1,2,3,4}_TOKEN` | `strom-node-{1,2,3,4}`'s epoch-0 token under the default key | adapter-1 to adapter-4; the recipes present node 1's for southbound reads |
+| `CONNECT_NATIVE_{1,2,3,4}_TOKEN` | `native-node-{1,2,3,4}`'s epoch-0 token under the default key | native-1 to native-4 |
 | `CONNECT_BROWSER_TOKEN` | `browser-bench`'s epoch-0 token under the default key | the in-bench browser page, which takes its node id from it |
 | `CONNECT_BROWSER_2_TOKEN` | `browser-bench-2`'s epoch-0 token under the default key | the second in-bench page (`browser-2`) |
 | `CONNECT_SRT_KEY_SECRET` | `bench-srt-key-secret-for-local-use-only` | both controllers, to derive the keys of SRT links between nodes |

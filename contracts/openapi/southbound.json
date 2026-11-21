@@ -1323,6 +1323,15 @@
                               "minimum": 1,
                               "maximum": 60000
                             },
+                            "max_skew_ms": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "format": "uint32",
+                              "minimum": 1,
+                              "maximum": 10000
+                            },
                             "mode": {
                               "type": "string",
                               "const": "low_latency"
@@ -2023,7 +2032,8 @@
                         "output_unavailable",
                         "output_backpressure",
                         "buffer_exhausted",
-                        "latency_budget_infeasible"
+                        "latency_budget_infeasible",
+                        "skew_exceeded"
                       ]
                     },
                     "selected_latency_ms": {
@@ -2067,6 +2077,30 @@
                       "minimum": 0
                     },
                     "maximum_release_age_us": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint64",
+                      "minimum": 0
+                    },
+                    "latest_release_age_us": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint64",
+                      "minimum": 0
+                    },
+                    "skew_us": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint64",
+                      "minimum": 0
+                    },
+                    "hold_us": {
                       "type": [
                         "integer",
                         "null"
@@ -4327,7 +4361,8 @@
                         "output_unavailable",
                         "output_backpressure",
                         "buffer_exhausted",
-                        "latency_budget_infeasible"
+                        "latency_budget_infeasible",
+                        "skew_exceeded"
                       ]
                     },
                     "selected_latency_ms": {
@@ -4371,6 +4406,30 @@
                       "minimum": 0
                     },
                     "maximum_release_age_us": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint64",
+                      "minimum": 0
+                    },
+                    "latest_release_age_us": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint64",
+                      "minimum": 0
+                    },
+                    "skew_us": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint64",
+                      "minimum": 0
+                    },
+                    "hold_us": {
                       "type": [
                         "integer",
                         "null"
@@ -5713,7 +5772,8 @@
                         "output_unavailable",
                         "output_backpressure",
                         "buffer_exhausted",
-                        "latency_budget_infeasible"
+                        "latency_budget_infeasible",
+                        "skew_exceeded"
                       ]
                     },
                     "selected_latency_ms": {
@@ -5757,6 +5817,30 @@
                       "minimum": 0
                     },
                     "maximum_release_age_us": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint64",
+                      "minimum": 0
+                    },
+                    "latest_release_age_us": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint64",
+                      "minimum": 0
+                    },
+                    "skew_us": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint64",
+                      "minimum": 0
+                    },
+                    "hold_us": {
                       "type": [
                         "integer",
                         "null"

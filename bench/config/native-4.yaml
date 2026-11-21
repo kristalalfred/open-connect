@@ -1,0 +1,25 @@
+node:
+  id: native-node-4
+  southbound_url: https://10.97.25.25:9443
+  listen: 0.0.0.0:8191
+  topology:
+    attachments:
+      - id: out
+        network: native-studio
+        dial: false
+        listeners:
+          srt:
+            host: 10.97.30.12
+            port_range: { start: 24000, end: 24099 }
+      - id: a
+        network: native-a
+        dial: true
+      - id: b
+        network: native-b
+        dial: true
+clock:
+  provider: shared_host
+  domain: bench
+  tai_offset_secs: 37
+media:
+  listen_ip: 10.97.30.12

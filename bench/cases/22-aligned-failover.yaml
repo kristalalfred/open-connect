@@ -1,0 +1,80 @@
+name: aligned-failover
+description: An aligned low-latency stream over two paths of unequal delay keeps its release timing and loses no record when either path fails and returns.
+steps:
+  - do: netem
+    node: node2
+    args: [delay, 30ms]
+  - do: apply
+    file: ../manifests/aligned.yaml
+    stream: main
+  - do: drive
+    stream: main
+  - do: await
+    stream: main
+    status: flowing
+  - do: delivery
+    stream: main
+    destination: studio
+    redundancy_ready: true
+    hold_ms: [45, 150]
+    mark: aligned
+  - do: observe
+    receivers: [main/studio]
+    seconds: 16
+    max_gap_ms: 1000
+    during:
+      - do: netem
+        node: node1
+        args: [loss, "100%"]
+      - do: wait
+        seconds: 7
+      - do: delivery
+        stream: main
+        destination: studio
+        since: aligned
+        max_new_unrecovered: 0
+        max_age_shift_ms: 15
+      - do: wait
+        seconds: 1
+      - do: clear_netem
+        node: node1
+  - do: delivery
+    stream: main
+    destination: studio
+    since: aligned
+    redundancy_ready: true
+    max_new_unrecovered: 0
+    max_age_growth_ms: 20
+    mark: fast-path-restored
+  - do: observe
+    receivers: [main/studio]
+    seconds: 16
+    max_gap_ms: 1000
+    during:
+      - do: netem
+        node: node2
+        args: [delay, 30ms, loss, "100%"]
+      - do: wait
+        seconds: 7
+      - do: delivery
+        stream: main
+        destination: studio
+        since: fast-path-restored
+        max_new_unrecovered: 0
+        max_age_shift_ms: 15
+      - do: wait
+        seconds: 1
+      - do: netem
+        node: node2
+        args: [delay, 30ms]
+  - do: delivery
+    stream: main
+    destination: studio
+    since: fast-path-restored
+    redundancy_ready: true
+    max_new_unrecovered: 0
+    max_age_growth_ms: 20
+  - do: clear_netem
+    node: node2
+  - do: delete
+    stream: main

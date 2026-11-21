@@ -372,7 +372,8 @@ fn low_latency_splits_its_budget_across_two_paths_without_requiring_them_or_a_sh
     assert_eq!(
         timing.policy,
         Some(DeliveryPolicy::LowLatency {
-            max_latency_ms: 150
+            max_latency_ms: 150,
+            max_skew_ms: None,
         })
     );
     assert_eq!(latency(&origin.ingress), Some(20));
@@ -406,6 +407,67 @@ fn low_latency_splits_its_budget_across_two_paths_without_requiring_them_or_a_sh
         .unwrap();
     assert_eq!(redundancy.status, StreamConditionStatus::True);
     assert!(redundancy.detail.starts_with("1 of 2 attempted paths"));
+}
+
+#[test]
+fn an_aligned_destination_reports_its_hold_and_degrades_when_the_skew_outgrows_the_allowance() {
+    let mut observed = observed();
+    observed.nodes[1].capabilities.hop_profiles[1]
+        .timed_delivery
+        .as_mut()
+        .unwrap()
+        .clock_domain = "shared-host:other".into();
+    let aligned: StreamDefinition = serde_json::from_value(serde_json::json!({
+        "name":"talk", "source":{"srt":{"node":"source"}},
+        "destinations":[{"id":"studio","paths":2,"delivery":{"mode":"low_latency","max_latency_ms":150,"max_skew_ms":60},"srt":{"node":"studio"}}]
+    }))
+    .unwrap();
+    let outcome = reconcile(vec![aligned.clone()], &observed, &LinkKeys::for_tests());
+    observed.hops = outcome.hops_by_stream["talk"].iter().map(report).collect();
+    let receiver = observed
+        .hops
+        .iter_mut()
+        .find(|hop| hop.delivery.is_some())
+        .unwrap()
+        .delivery
+        .as_mut()
+        .unwrap();
+    receiver.skew_us = Some(42_000);
+    receiver.hold_us = Some(42_000);
+    let flowing = reconcile(vec![aligned.clone()], &observed, &LinkKeys::for_tests());
+    assert_eq!(flowing.streams[0].status, PathStatus::Flowing);
+    let condition = |outcome: &crate::ReconcileOutcome, kind| {
+        outcome.streams[0].destinations[0]
+            .conditions
+            .iter()
+            .find(|condition| condition.condition_type == kind)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        condition(&flowing, StreamConditionType::TimingReady).detail,
+        "first-copy release within 150 ms, faster path held 42 ms"
+    );
+    let receiver = observed
+        .hops
+        .iter_mut()
+        .find(|hop| hop.delivery.is_some())
+        .unwrap()
+        .delivery
+        .as_mut()
+        .unwrap();
+    receiver.skew_us = Some(95_000);
+    receiver.hold_us = Some(60_000);
+    receiver.redundancy_ready = false;
+    receiver.reason = connect_core::DeliveryReason::SkewExceeded;
+    let skewed = reconcile(vec![aligned], &observed, &LinkKeys::for_tests());
+    assert_eq!(skewed.streams[0].status, PathStatus::Degraded);
+    let redundancy = condition(&skewed, StreamConditionType::RedundancyReady);
+    assert_eq!(redundancy.status, StreamConditionStatus::False);
+    assert_eq!(
+        redundancy.detail,
+        "the slower path lags 95 ms, more than max_skew_ms 60"
+    );
 }
 
 #[test]

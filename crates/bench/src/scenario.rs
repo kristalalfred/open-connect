@@ -101,6 +101,26 @@ pub enum Step {
     Wait {
         seconds: u64,
     },
+    Delivery {
+        stream: String,
+        destination: String,
+        #[serde(default)]
+        redundancy_ready: Option<bool>,
+        #[serde(default)]
+        hold_ms: Option<[u64; 2]>,
+        #[serde(default)]
+        mark: Option<String>,
+        #[serde(default)]
+        since: Option<String>,
+        #[serde(default)]
+        max_new_unrecovered: Option<u64>,
+        #[serde(default)]
+        max_age_growth_ms: Option<u64>,
+        #[serde(default)]
+        max_age_shift_ms: Option<u64>,
+        #[serde(default = "default_timeout")]
+        timeout_secs: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
@@ -153,11 +173,13 @@ impl Scenario {
         ensure!(!scenario.steps.is_empty(), "scenario has no steps");
         let mut streams = BTreeSet::new();
         let mut snapshots = BTreeSet::new();
+        let mut marks = BTreeSet::new();
         validate_steps(
             &scenario.steps,
             path.parent().unwrap_or(Path::new(".")),
             &mut streams,
             &mut snapshots,
+            &mut marks,
             false,
         )?;
         Ok(scenario)
@@ -169,6 +191,7 @@ fn validate_steps(
     directory: &Path,
     streams: &mut BTreeSet<String>,
     snapshots: &mut BTreeSet<String>,
+    marks: &mut BTreeSet<String>,
     observing: bool,
 ) -> Result<()> {
     for step in steps {
@@ -264,7 +287,7 @@ fn validate_steps(
                     validate_receiver(receiver, streams)?;
                     ensure!(unique.insert(receiver), "duplicate receiver {receiver}");
                 }
-                validate_steps(during, directory, streams, snapshots, true)?;
+                validate_steps(during, directory, streams, snapshots, marks, true)?;
             }
             Step::Service { service, .. } => {
                 ensure!(
@@ -301,6 +324,38 @@ fn validate_steps(
                 ensure!(snapshots.contains(snapshot), "unknown snapshot {snapshot}");
             }
             Step::Wait { seconds } => ensure!(*seconds > 0, "wait seconds must be positive"),
+            Step::Delivery {
+                stream,
+                destination,
+                hold_ms,
+                mark,
+                since,
+                max_new_unrecovered,
+                max_age_growth_ms,
+                max_age_shift_ms,
+                timeout_secs,
+                ..
+            } => {
+                ensure!(streams.contains(stream), "unknown stream {stream}");
+                validate_resource_id(destination)?;
+                ensure!(*timeout_secs > 0, "timeout_secs must be positive");
+                ensure!(
+                    hold_ms.is_none_or(|[minimum, maximum]| minimum <= maximum),
+                    "hold_ms must be [minimum, maximum]"
+                );
+                match since {
+                    Some(since) => ensure!(marks.contains(since), "unknown delivery mark {since}"),
+                    None => ensure!(
+                        max_new_unrecovered.is_none()
+                            && max_age_growth_ms.is_none()
+                            && max_age_shift_ms.is_none(),
+                        "max_new_unrecovered, max_age_growth_ms and max_age_shift_ms compare against a since mark"
+                    ),
+                }
+                if let Some(mark) = mark {
+                    ensure!(marks.insert(mark.clone()), "duplicate delivery mark {mark}");
+                }
+            }
         }
     }
     Ok(())
@@ -361,10 +416,34 @@ mod tests {
                     Path::new("."),
                     &mut BTreeSet::new(),
                     &mut BTreeSet::new(),
+                    &mut BTreeSet::new(),
                     false
                 )
                 .is_err()
             );
+        }
+    }
+
+    #[test]
+    fn delivery_comparisons_need_an_earlier_mark() {
+        let steps = |yaml: &str| serde_norway::from_str::<Vec<Step>>(yaml).unwrap();
+        let check = |steps: Vec<Step>| {
+            validate_steps(
+                &steps,
+                Path::new("."),
+                &mut BTreeSet::from(["main".into()]),
+                &mut BTreeSet::new(),
+                &mut BTreeSet::new(),
+                false,
+            )
+        };
+        assert!(check(steps("- {do: delivery, stream: main, destination: studio, mark: before}\n- {do: delivery, stream: main, destination: studio, since: before, max_new_unrecovered: 0}")).is_ok());
+        for yaml in [
+            "- {do: delivery, stream: main, destination: studio, since: before}",
+            "- {do: delivery, stream: main, destination: studio, max_age_growth_ms: 10}",
+            "- {do: delivery, stream: main, destination: studio, hold_ms: [80, 40]}",
+        ] {
+            assert!(check(steps(yaml)).is_err(), "{yaml}");
         }
     }
 
@@ -399,6 +478,7 @@ mod tests {
                     Path::new("."),
                     &mut BTreeSet::from(["main".into()]),
                     &mut BTreeSet::new(),
+                    &mut BTreeSet::new(),
                     false
                 )
                 .is_err()
@@ -411,6 +491,7 @@ mod tests {
                 &[step],
                 &root,
                 &mut BTreeSet::from(["main".into()]),
+                &mut BTreeSet::new(),
                 &mut BTreeSet::new(),
                 false
             )

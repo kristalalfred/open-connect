@@ -8,11 +8,114 @@ use crate::record::{HEADER_LENGTH, Record};
 const NS_PER_MS: u64 = 1_000_000;
 const HEALTH_WINDOW_NS: u64 = 5_000_000_000;
 const SKIPPED_RANGES: usize = 64;
+const SKEW_WINDOW_NS: u64 = 1_000_000_000;
+const SKEW_UPDATE_NS: u64 = 100_000_000;
+const SKEW_MIN_SAMPLES: usize = 16;
+const SKEW_SAMPLES: usize = 4_096;
+const SKEW_IDLE_NS: u64 = 500_000_000;
 pub const UNKNOWN_UNCERTAINTY_NS: u32 = u32::MAX;
 
 struct Arrival {
     record: Record,
-    arrived_ns: u64,
+    due_ns: u64,
+}
+
+struct Alignment {
+    max_skew_ns: u64,
+    first_copies: BTreeMap<u64, (usize, u64)>,
+    samples: VecDeque<(u64, i64)>,
+    lag_ns: Option<i64>,
+    updated_ns: Option<u64>,
+    last_seen_ns: [Option<u64>; 2],
+    resumed_ns: [Option<u64>; 2],
+}
+
+impl Alignment {
+    fn new(max_skew_ms: u32) -> Self {
+        Self {
+            max_skew_ns: u64::from(max_skew_ms) * NS_PER_MS,
+            first_copies: BTreeMap::new(),
+            samples: VecDeque::new(),
+            lag_ns: None,
+            updated_ns: None,
+            last_seen_ns: [None; 2],
+            resumed_ns: [None; 2],
+        }
+    }
+
+    fn observe(&mut self, sequence: u64, path: usize, now_ns: u64, capacity: usize) {
+        if self.last_seen_ns[path].is_some_and(|last| now_ns.saturating_sub(last) >= SKEW_IDLE_NS) {
+            self.resumed_ns[path] = Some(now_ns);
+        }
+        self.last_seen_ns[path] = Some(now_ns);
+        let settling = self
+            .resumed_ns
+            .iter()
+            .flatten()
+            .any(|resumed| now_ns.saturating_sub(*resumed) < SKEW_WINDOW_NS);
+        let horizon_ns = self.max_skew_ns + SKEW_WINDOW_NS;
+        while let Some((_, (_, first_ns))) = self.first_copies.first_key_value() {
+            if now_ns.saturating_sub(*first_ns) <= horizon_ns && self.first_copies.len() < capacity
+            {
+                break;
+            }
+            self.first_copies.pop_first();
+        }
+        match self.first_copies.get(&sequence) {
+            Some((first_path, _)) if *first_path == path => {}
+            Some(_) if settling => {
+                self.first_copies.remove(&sequence);
+            }
+            Some(&(_, first_ns)) => {
+                self.first_copies.remove(&sequence);
+                let gap = i64::try_from(now_ns.saturating_sub(first_ns)).unwrap_or(i64::MAX);
+                self.samples
+                    .push_back((now_ns, if path == 1 { gap } else { -gap }));
+                if self.samples.len() > SKEW_SAMPLES {
+                    self.samples.pop_front();
+                }
+            }
+            None => {
+                self.first_copies.insert(sequence, (path, now_ns));
+            }
+        }
+        while self
+            .samples
+            .front()
+            .is_some_and(|(at, _)| now_ns.saturating_sub(*at) > SKEW_WINDOW_NS)
+        {
+            self.samples.pop_front();
+        }
+        if self.samples.len() >= SKEW_MIN_SAMPLES
+            && self
+                .updated_ns
+                .is_none_or(|updated| now_ns.saturating_sub(updated) >= SKEW_UPDATE_NS)
+        {
+            let mut lags: Vec<i64> = self.samples.iter().map(|(_, lag)| *lag).collect();
+            let middle = lags.len() / 2;
+            self.lag_ns = Some(*lags.select_nth_unstable(middle).1);
+            self.updated_ns = Some(now_ns);
+        }
+    }
+
+    fn skew_ns(&self) -> Option<u64> {
+        self.lag_ns.map(i64::unsigned_abs)
+    }
+
+    fn hold_ns(&self) -> u64 {
+        self.skew_ns().unwrap_or(0).min(self.max_skew_ns)
+    }
+
+    fn offset_ns(&self, path: usize) -> u64 {
+        match self.lag_ns {
+            Some(lag) if (lag > 0 && path == 0) || (lag < 0 && path == 1) => self.hold_ns(),
+            _ => 0,
+        }
+    }
+
+    fn exceeded(&self) -> bool {
+        self.skew_ns().is_some_and(|skew| skew > self.max_skew_ns)
+    }
 }
 
 pub struct FirstCopy {
@@ -20,6 +123,7 @@ pub struct FirstCopy {
     input_paths: usize,
     requested_paths: usize,
     limits: BufferLimits,
+    alignment: Option<Alignment>,
     pending: BTreeMap<u64, Arrival>,
     pending_bytes: usize,
     watermark: Option<u64>,
@@ -34,6 +138,7 @@ impl FirstCopy {
     #[must_use]
     pub fn new(
         wait_ms: u32,
+        max_skew_ms: Option<u32>,
         input_paths: usize,
         requested_paths: usize,
         limits: BufferLimits,
@@ -44,6 +149,7 @@ impl FirstCopy {
             input_paths,
             requested_paths,
             limits,
+            alignment: max_skew_ms.map(Alignment::new),
             pending: BTreeMap::new(),
             pending_bytes: 0,
             watermark: None,
@@ -58,10 +164,21 @@ impl FirstCopy {
         }
     }
 
-    pub fn reconfigure(&mut self, input_paths: usize, requested_paths: usize) {
+    pub fn reconfigure(
+        &mut self,
+        max_skew_ms: Option<u32>,
+        input_paths: usize,
+        requested_paths: usize,
+    ) {
         assert!((1..=2).contains(&input_paths));
         self.input_paths = input_paths;
         self.requested_paths = requested_paths;
+        match (&mut self.alignment, max_skew_ms) {
+            (Some(alignment), Some(max_skew_ms)) => {
+                alignment.max_skew_ns = u64::from(max_skew_ms) * NS_PER_MS;
+            }
+            (alignment, max_skew_ms) => *alignment = max_skew_ms.map(Alignment::new),
+        }
         self.report
             .paths
             .resize(input_paths, DeliveryPathReport::default());
@@ -98,6 +215,14 @@ impl FirstCopy {
             return;
         }
         self.last_received[path] = Some(now_ns);
+        if let Some(alignment) = &mut self.alignment {
+            alignment.observe(record.sequence, path, now_ns, self.limits.records);
+        }
+        let due_ns = now_ns.saturating_add(
+            self.alignment
+                .as_ref()
+                .map_or(0, |alignment| alignment.offset_ns(path)),
+        );
         let report = &mut self.report.paths[path];
         report.received += 1;
         if let Some(clock) =
@@ -118,8 +243,9 @@ impl FirstCopy {
             }
             return;
         }
-        if let Some(existing) = self.pending.get(&record.sequence) {
+        if let Some(existing) = self.pending.get_mut(&record.sequence) {
             if existing.record == record {
+                existing.due_ns = existing.due_ns.min(due_ns);
                 self.report.counters.duplicates += 1;
             } else {
                 self.pending.clear();
@@ -150,13 +276,8 @@ impl FirstCopy {
             return;
         }
         self.pending_bytes += size;
-        self.pending.insert(
-            record.sequence,
-            Arrival {
-                record,
-                arrived_ns: now_ns,
-            },
-        );
+        self.pending
+            .insert(record.sequence, Arrival { record, due_ns });
     }
 
     fn expected(&self, first: u64) -> u64 {
@@ -167,9 +288,9 @@ impl FirstCopy {
     pub fn next_deadline_ns(&self) -> Option<u64> {
         let (sequence, arrival) = self.pending.first_key_value()?;
         Some(if *sequence == self.expected(*sequence) {
-            arrival.arrived_ns
+            arrival.due_ns
         } else {
-            arrival.arrived_ns.saturating_add(self.wait_ns)
+            arrival.due_ns.saturating_add(self.wait_ns)
         })
     }
 
@@ -179,8 +300,11 @@ impl FirstCopy {
         }
         let (&sequence, arrival) = self.pending.first_key_value()?;
         let expected = self.expected(sequence);
+        if sequence == expected && now_ns < arrival.due_ns {
+            return None;
+        }
         if sequence != expected {
-            if now_ns.saturating_sub(arrival.arrived_ns) < self.wait_ns {
+            if now_ns < arrival.due_ns.saturating_add(self.wait_ns) {
                 return None;
             }
             self.report.counters.unrecovered = self
@@ -207,6 +331,7 @@ impl FirstCopy {
             clock.filter(|_| record.origin_uncertainty_ns != UNKNOWN_UNCERTAINTY_NS)
         {
             let age_us = clock.tai_ns.saturating_sub(record.origin_tai_ns) / 1_000;
+            self.report.latest_release_age_us = Some(age_us);
             self.report.minimum_release_age_us = Some(
                 self.report
                     .minimum_release_age_us
@@ -238,6 +363,14 @@ impl FirstCopy {
         }
         report.redundancy_ready = self.input_paths == self.requested_paths
             && report.paths.iter().all(|path| path.qualified);
+        let skew_exceeded = self.alignment.as_ref().is_some_and(|alignment| {
+            report.skew_us = alignment.skew_ns().map(|skew| skew / 1_000);
+            report.hold_us = Some(alignment.hold_ns() / 1_000);
+            alignment.exceeded()
+        });
+        if skew_exceeded {
+            report.redundancy_ready = false;
+        }
         if report.state == DeliveryState::Failed {
             report.timing_ready = false;
             return report;
@@ -248,7 +381,11 @@ impl FirstCopy {
         } else if recent(self.last_fault_ns) {
             (DeliveryState::Degraded, false)
         } else {
-            report.reason = DeliveryReason::Timely;
+            report.reason = if skew_exceeded {
+                DeliveryReason::SkewExceeded
+            } else {
+                DeliveryReason::Timely
+            };
             (DeliveryState::Ready, true)
         };
         report
@@ -275,7 +412,7 @@ mod tests {
     }
 
     fn receiver(paths: usize) -> FirstCopy {
-        FirstCopy::new(10, paths, 2, BufferLimits::default())
+        FirstCopy::new(10, None, paths, 2, BufferLimits::default())
     }
 
     fn drain(receiver: &mut FirstCopy, now_ns: u64) -> Vec<u64> {
@@ -335,6 +472,147 @@ mod tests {
         );
     }
 
+    struct Links {
+        lag_ms: [u64; 2],
+        down: [std::ops::Range<u64>; 2],
+        backlog: u64,
+    }
+
+    fn run_aligned(receiver: &mut FirstCopy, links: &Links, records: u64) -> BTreeMap<u64, u64> {
+        let mut released = BTreeMap::new();
+        let horizon = records + links.lag_ms.iter().max().unwrap() + 20;
+        for now in 0..horizon {
+            for path in 0..2 {
+                let Some(sequence) = now.checked_sub(links.lag_ms[path]) else {
+                    continue;
+                };
+                let down = &links.down[path];
+                if sequence == down.end && !down.is_empty() {
+                    for old in down.end.saturating_sub(links.backlog)..down.end {
+                        receiver.ingest(record(old), path, now * MS, None);
+                    }
+                }
+                if sequence < records && !down.contains(&sequence) {
+                    receiver.ingest(record(sequence), path, now * MS, None);
+                }
+            }
+            for sequence in drain(receiver, now * MS) {
+                released.insert(sequence, now);
+            }
+        }
+        released
+    }
+
+    #[test]
+    fn aligned_release_holds_the_faster_path_so_losing_and_regaining_it_moves_no_record() {
+        let mut receiver = FirstCopy::new(10, Some(80), 2, 2, BufferLimits::default());
+        let links = Links {
+            lag_ms: [5, 45],
+            down: [400..600, 0..0],
+            backlog: 0,
+        };
+        let released = run_aligned(&mut receiver, &links, 1_000);
+        for sequence in 200..1_000 {
+            assert_eq!(
+                released.get(&sequence),
+                Some(&(sequence + 45)),
+                "record {sequence}"
+            );
+        }
+        let report = receiver.report(1_000 * MS);
+        assert_eq!(report.counters.unrecovered, 0);
+        assert_eq!(report.counters.late_arrivals, 0);
+        assert_eq!(report.skew_us, Some(40_000));
+        assert_eq!(report.hold_us, Some(40_000));
+        assert_eq!(report.reason, DeliveryReason::Timely);
+    }
+
+    #[test]
+    fn aligned_release_holds_whichever_path_is_faster_and_survives_losing_the_slower_one() {
+        let mut receiver = FirstCopy::new(10, Some(80), 2, 2, BufferLimits::default());
+        let links = Links {
+            lag_ms: [30, 0],
+            down: [400..600, 0..0],
+            backlog: 0,
+        };
+        let released = run_aligned(&mut receiver, &links, 1_000);
+        for sequence in 200..1_000 {
+            assert_eq!(
+                released.get(&sequence),
+                Some(&(sequence + 30)),
+                "record {sequence}"
+            );
+        }
+        assert_eq!(receiver.report(1_000 * MS).counters.unrecovered, 0);
+        let mut receiver = FirstCopy::new(10, Some(80), 2, 2, BufferLimits::default());
+        let links = Links {
+            lag_ms: [30, 0],
+            down: [0..0, 400..600],
+            backlog: 0,
+        };
+        let released = run_aligned(&mut receiver, &links, 1_000);
+        for sequence in 200..1_000 {
+            assert_eq!(
+                released.get(&sequence),
+                Some(&(sequence + 30)),
+                "record {sequence}"
+            );
+        }
+        assert_eq!(receiver.report(1_000 * MS).counters.unrecovered, 0);
+    }
+
+    #[test]
+    fn a_backlog_a_returning_path_delivers_does_not_move_the_hold() {
+        let mut receiver = FirstCopy::new(10, Some(80), 2, 2, BufferLimits::default());
+        let links = Links {
+            lag_ms: [5, 45],
+            down: [400..1_000, 0..0],
+            backlog: 600,
+        };
+        let released = run_aligned(&mut receiver, &links, 2_000);
+        for sequence in 200..2_000 {
+            assert_eq!(
+                released.get(&sequence),
+                Some(&(sequence + 45)),
+                "record {sequence}"
+            );
+        }
+        let report = receiver.report(2_000 * MS);
+        assert_eq!(report.counters.unrecovered, 0);
+        assert_eq!(report.hold_us, Some(40_000));
+    }
+
+    #[test]
+    fn a_skew_beyond_the_allowance_holds_only_the_allowance_and_reports_redundancy_lost() {
+        let mut receiver = FirstCopy::new(10, Some(80), 2, 2, BufferLimits::default());
+        let links = Links {
+            lag_ms: [0, 120],
+            down: [0..0, 0..0],
+            backlog: 0,
+        };
+        let released = run_aligned(&mut receiver, &links, 1_000);
+        assert_eq!(released.get(&500), Some(&580));
+        let report = receiver.report(1_000 * MS);
+        assert_eq!(report.skew_us, Some(120_000));
+        assert_eq!(report.hold_us, Some(80_000));
+        assert!(report.timing_ready && !report.redundancy_ready);
+        assert_eq!(report.reason, DeliveryReason::SkewExceeded);
+    }
+
+    #[test]
+    fn without_an_allowance_the_faster_path_is_released_at_once() {
+        let mut receiver = receiver(2);
+        let links = Links {
+            lag_ms: [5, 45],
+            down: [0..0, 0..0],
+            backlog: 0,
+        };
+        let released = run_aligned(&mut receiver, &links, 300);
+        assert_eq!(released.get(&200), Some(&205));
+        let report = receiver.report(300 * MS);
+        assert_eq!((report.skew_us, report.hold_us), (None, None));
+    }
+
     #[test]
     fn conflicting_copies_of_one_record_fail_the_receiver() {
         let mut receiver = receiver(2);
@@ -350,7 +628,7 @@ mod tests {
 
     #[test]
     fn one_path_releases_without_redundancy_and_ages_need_a_stamped_origin() {
-        let mut receiver = FirstCopy::new(10, 1, 2, BufferLimits::default());
+        let mut receiver = FirstCopy::new(10, None, 1, 2, BufferLimits::default());
         let clock = ClockSample {
             tai_ns: 1_040 * MS,
             monotonic_ns: 0,
@@ -364,6 +642,7 @@ mod tests {
         let report = receiver.report(MS);
         assert!(report.timing_ready && !report.redundancy_ready);
         assert_eq!(report.paths[0].latest_age_us, Some(40_000));
+        assert_eq!(report.latest_release_age_us, None);
         assert_eq!(report.clock_uncertainty_us, Some(2));
     }
 }

@@ -1,7 +1,8 @@
 use connect_core::{
-    DeliveryPolicy, DeliveryReport, DeliveryRole, DeliveryState, DesiredHop, HopProfile, HopRole,
-    NodeDescriptor, PathStatus, PayloadKind, SocketSpec, StreamCondition, StreamConditionReason,
-    StreamConditionStatus, StreamConditionType, StreamDefinition, StreamDestination, TimedHop,
+    DeliveryPolicy, DeliveryReason, DeliveryReport, DeliveryRole, DeliveryState, DesiredHop,
+    HopProfile, HopRole, NodeDescriptor, PathStatus, PayloadKind, SocketSpec, StreamCondition,
+    StreamConditionReason, StreamConditionStatus, StreamConditionType, StreamDefinition,
+    StreamDestination, TimedHop,
 };
 use sha2::{Digest, Sha256};
 
@@ -284,7 +285,13 @@ pub fn conditions(
                             report.selected_latency_ms.unwrap_or_default()
                         )
                     },
-                    |maximum| format!("first-copy release within {maximum} ms"),
+                    |maximum| match report.hold_us {
+                        Some(hold) => format!(
+                            "first-copy release within {maximum} ms, faster path held {} ms",
+                            hold / 1_000
+                        ),
+                        None => format!("first-copy release within {maximum} ms"),
+                    },
                 ),
             )
         } else if report.state == DeliveryState::Calibrating {
@@ -325,11 +332,24 @@ pub fn conditions(
             } else {
                 StreamConditionReason::RedundancyDegraded
             },
-            format!(
-                "{} of {} requested paths have recent timely media",
-                report.paths.iter().filter(|path| path.qualified).count(),
-                requested_paths
-            ),
+            match (
+                report.reason,
+                report.skew_us,
+                destination
+                    .delivery
+                    .as_ref()
+                    .and_then(DeliveryPolicy::max_skew_ms),
+            ) {
+                (DeliveryReason::SkewExceeded, Some(skew), Some(allowance)) => format!(
+                    "the slower path lags {} ms, more than max_skew_ms {allowance}",
+                    skew / 1_000
+                ),
+                _ => format!(
+                    "{} of {} requested paths have recent timely media",
+                    report.paths.iter().filter(|path| path.qualified).count(),
+                    requested_paths
+                ),
+            },
         );
     }
     if requested_paths == 1 {

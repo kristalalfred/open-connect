@@ -35,6 +35,9 @@ pub enum DeliveryPolicy {
     LowLatency {
         #[schemars(range(min = 1, max = 60000))]
         max_latency_ms: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(range(min = 1, max = 10000))]
+        max_skew_ms: Option<u32>,
     },
 }
 
@@ -76,7 +79,7 @@ impl DeliveryPolicy {
     pub fn maximum_ms(&self) -> u32 {
         match self {
             Self::Fixed { latency_ms, .. } => *latency_ms,
-            Self::Auto { max_latency_ms, .. } | Self::LowLatency { max_latency_ms } => {
+            Self::Auto { max_latency_ms, .. } | Self::LowLatency { max_latency_ms, .. } => {
                 *max_latency_ms
             }
         }
@@ -89,6 +92,14 @@ impl DeliveryPolicy {
                 Some(*tolerance_ms)
             }
             Self::LowLatency { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub fn max_skew_ms(&self) -> Option<u32> {
+        match self {
+            Self::LowLatency { max_skew_ms, .. } => *max_skew_ms,
+            Self::Fixed { .. } | Self::Auto { .. } => None,
         }
     }
 
@@ -117,6 +128,15 @@ impl DeliveryPolicy {
             issues.push((
                 "tolerance_ms",
                 "tolerance must be positive and less than the latency",
+            ));
+        }
+        if self
+            .max_skew_ms()
+            .is_some_and(|skew| !(1..=10_000).contains(&skew))
+        {
+            issues.push((
+                "max_skew_ms",
+                "skew allowance must be between 1 and 10000 ms",
             ));
         }
         if let Self::Auto {
@@ -235,6 +255,7 @@ pub enum DeliveryReason {
     OutputBackpressure,
     BufferExhausted,
     LatencyBudgetInfeasible,
+    SkewExceeded,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -271,6 +292,12 @@ pub struct DeliveryReport {
     pub buffer_bytes: u64,
     pub minimum_release_age_us: Option<u64>,
     pub maximum_release_age_us: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_release_age_us: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skew_us: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_us: Option<u64>,
     pub counters: DeliveryCounters,
     pub paths: Vec<DeliveryPathReport>,
 }
@@ -309,5 +336,41 @@ mod tests {
         assert!(valid.validate().is_empty());
         let invalid: DeliveryPolicy = serde_json::from_value(json!({"mode":"auto", "min_latency_ms":500, "max_latency_ms":80, "calibration_ms":0, "max_late_ppm":100001})).unwrap();
         assert_eq!(invalid.validate().len(), 3);
+    }
+
+    #[test]
+    fn low_latency_skew_allowance_is_optional_bounded_and_only_for_low_latency() {
+        let unaligned: DeliveryPolicy =
+            serde_json::from_value(json!({"mode":"low_latency", "max_latency_ms":150})).unwrap();
+        assert_eq!(unaligned.max_skew_ms(), None);
+        assert_eq!(
+            serde_json::to_value(&unaligned).unwrap(),
+            json!({"mode":"low_latency", "max_latency_ms":150})
+        );
+        let aligned: DeliveryPolicy = serde_json::from_value(
+            json!({"mode":"low_latency", "max_latency_ms":150, "max_skew_ms":80}),
+        )
+        .unwrap();
+        assert_eq!(aligned.max_skew_ms(), Some(80));
+        assert!(aligned.validate().is_empty());
+        for skew in [0, 10_001] {
+            let invalid: DeliveryPolicy = serde_json::from_value(
+                json!({"mode":"low_latency", "max_latency_ms":150, "max_skew_ms":skew}),
+            )
+            .unwrap();
+            assert_eq!(
+                invalid.validate(),
+                vec![(
+                    "max_skew_ms",
+                    "skew allowance must be between 1 and 10000 ms"
+                )]
+            );
+        }
+        assert!(
+            serde_json::from_value::<DeliveryPolicy>(
+                json!({"mode":"fixed", "latency_ms":500, "max_skew_ms":80})
+            )
+            .is_err()
+        );
     }
 }

@@ -1216,6 +1216,15 @@
                               "minimum": 1,
                               "maximum": 60000
                             },
+                            "max_skew_ms": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "format": "uint32",
+                              "minimum": 1,
+                              "maximum": 10000
+                            },
                             "mode": {
                               "type": "string",
                               "const": "low_latency"

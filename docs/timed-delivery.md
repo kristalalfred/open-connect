@@ -44,6 +44,7 @@ independently from the same source timestamps.
 | `delivery.mode` | Required: `fixed`, `auto` or [`low_latency`](#low-latency). |
 | `latency_ms` | Fixed target, 1 to 60,000 ms. Required in fixed mode. |
 | `tolerance_ms` | Defaults to 5 ms. Positive and less than the target or minimum. |
+| `max_skew_ms` | Low latency only. Enables [path alignment](#path-alignment). |
 | `paths` | Existing desired count, 1 or 2. Defaults to 1. |
 | `srt.latency` | Separate per-connection SRT buffering, not the total delivery target. |
 
@@ -121,6 +122,37 @@ When the next record in sequence is missing, the receiver waits up to 10 ms for
 the other path's copy, then skips it and counts it as unrecovered. A copy that
 arrives after its record was skipped counts as late. Release ages are reported
 only while the origin and receiver share a clock domain.
+
+### Path alignment
+
+Without alignment, output follows the faster path. When the faster path fails,
+output pauses for the difference in path delay and stays that much later. When
+it returns, the receiver skips forward by the same amount.
+
+```yaml
+delivery:
+  mode: low_latency
+  max_latency_ms: 150
+  max_skew_ms: 80
+```
+
+`max_skew_ms`, 1 to 10,000, enables alignment. For every record that arrives on
+both paths, the receiver measures how much later the second copy arrives on its
+own monotonic clock, so alignment needs no clock domain. It takes the median of
+the last second of these measurements, at least 16, and holds the faster path's
+copies by that skew, at most `max_skew_ms`. A record is released when its
+earliest copy, plus that path's hold, is due. Output then follows the slower
+path, and losing or regaining either path moves releases only by path jitter.
+The cost is the slower path's delay on every record.
+
+Until both paths have delivered enough records, nothing is held. When the hold
+first applies, output pauses once by the measured skew. While a path is down,
+the last measured skew stays in force. When a path resumes after 500 ms without
+records, measurements are ignored for one second so that its backlog does not
+count as path delay. When the skew exceeds `max_skew_ms`, the
+receiver holds `max_skew_ms`, a failover pauses by the remainder, and
+`redundancy_ready` is false with reason `skew_exceeded`. `max_skew_ms` is
+separate from `max_latency_ms`, which bounds configured SRT buffering only.
 
 ## Identity and framing
 
@@ -252,14 +284,17 @@ schedule. Changes that replace sockets or policies can interrupt media.
 
 ## Status and verification
 
-Southbound protocol version is 14. Native profiles advertise separate origin,
+Southbound protocol version is 15. Native profiles advertise separate origin,
 forward and receiver roles; the timed receiver advertises merge support and
 the `modes` it releases.
 Strom rejects timed desired hops; browser profiles advertise none. Rebuild
 nodes and control-plane components together when upgrading.
 
 Destination `delivery` reports the selected delay, state, reason, clock
-uncertainty, buffer usage, observed release ages, per-path ages and counters.
+uncertainty, buffer usage, the latest and extreme release ages, per-path ages
+and counters.
+An aligned `low_latency` receiver also reports the measured `skew_us` and the
+applied `hold_us`.
 Counters include releases, duplicates, late copies, known unrecovered records,
 scheduling violations, buffer drops and invalid records. Only reports matching
 the current desired revision count. Current origin faults also invalidate the

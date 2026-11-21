@@ -1383,7 +1383,7 @@ fn link_latency(
     let edges_ms = ingress_ms + consumer_latency(destination);
     let latency = match (endpoint.latency, &destination.delivery) {
         (Some(latency), _) => latency,
-        (None, Some(connect_core::DeliveryPolicy::LowLatency { max_latency_ms })) => {
+        (None, Some(connect_core::DeliveryPolicy::LowLatency { max_latency_ms, .. })) => {
             let reserved_ms = edges_ms + connect_core::delivery::LOW_LATENCY_MERGE_WAIT_MS;
             let latency = max_latency_ms.saturating_sub(reserved_ms) / links as u32;
             if latency < LOW_LATENCY_LINK_FLOOR_MS {

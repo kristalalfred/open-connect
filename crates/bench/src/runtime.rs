@@ -33,6 +33,10 @@ const SERVICES: &[&str] = &[
     "strom-2",
     "strom-3",
     "strom-4",
+    "native-1",
+    "native-2",
+    "native-3",
+    "native-4",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +74,7 @@ pub struct Bench {
     impaired: BTreeSet<String>,
     stopped: BTreeSet<String>,
     snapshots: BTreeMap<String, Snapshot>,
+    marks: BTreeMap<String, Value>,
     completed_media: Vec<Value>,
 }
 
@@ -116,6 +121,7 @@ impl Bench {
             impaired: BTreeSet::new(),
             stopped: BTreeSet::new(),
             snapshots: BTreeMap::new(),
+            marks: BTreeMap::new(),
             completed_media: Vec::new(),
         })
     }
@@ -175,17 +181,19 @@ impl Bench {
             let body: Value = self.get("/nodes").await?;
             self.report.event("preflight_nodes", &body)?;
             let nodes = Vec::<read::NodeResource>::deserialize(&body)?;
-            if (1..=4).all(|n| {
-                nodes.iter().any(|resource| {
-                    resource.node.id == format!("strom-node-{n}")
-                        && resource.node.status == NodeStatus::Ready
+            if ["strom-node", "native-node"].iter().all(|kind| {
+                (1..=4).all(|n| {
+                    nodes.iter().any(|resource| {
+                        resource.node.id == format!("{kind}-{n}")
+                            && resource.node.status == NodeStatus::Ready
+                    })
                 })
             }) {
                 break;
             }
             ensure!(
                 Instant::now() < deadline,
-                "all four media nodes did not become ready"
+                "all eight media nodes did not become ready"
             );
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
@@ -457,8 +465,101 @@ impl Bench {
             }
             Step::Delete { stream } => self.delete(stream).await?,
             Step::Wait { seconds } => tokio::time::sleep(Duration::from_secs(*seconds)).await,
+            Step::Delivery {
+                stream,
+                destination,
+                redundancy_ready,
+                hold_ms,
+                mark,
+                since,
+                max_new_unrecovered,
+                max_age_growth_ms,
+                max_age_shift_ms,
+                timeout_secs,
+            } => {
+                let expected = DeliveryExpectation {
+                    redundancy_ready: *redundancy_ready,
+                    hold_ms: *hold_ms,
+                    max_new_unrecovered: *max_new_unrecovered,
+                    max_age_growth_ms: *max_age_growth_ms,
+                    max_age_shift_ms: *max_age_shift_ms,
+                };
+                let baseline = since
+                    .as_ref()
+                    .map(|since| {
+                        self.marks
+                            .get(since)
+                            .cloned()
+                            .context("unknown delivery mark")
+                    })
+                    .transpose()?;
+                let report = self
+                    .await_delivery(
+                        stream,
+                        destination,
+                        &expected,
+                        baseline.as_ref(),
+                        *timeout_secs,
+                    )
+                    .await?;
+                if let Some(mark) = mark {
+                    self.marks.insert(mark.clone(), report);
+                }
+            }
         }
         Ok(())
+    }
+
+    async fn await_delivery(
+        &self,
+        alias: &str,
+        destination: &str,
+        expected: &DeliveryExpectation,
+        baseline: Option<&Value>,
+        seconds: u64,
+    ) -> Result<Value> {
+        let name = self.name(alias)?;
+        let deadline = Instant::now() + Duration::from_secs(seconds);
+        loop {
+            let delivery = self.get::<Value>("/status").await.map(|body| {
+                body["streams"]
+                    .as_array()
+                    .and_then(|streams| streams.iter().find(|stream| stream["name"] == name))
+                    .and_then(|stream| stream["destinations"].as_array())
+                    .and_then(|destinations| {
+                        destinations
+                            .iter()
+                            .find(|candidate| candidate["id"] == destination)
+                    })
+                    .map(|destination| destination["delivery"].clone())
+                    .filter(|delivery| delivery.is_object())
+            });
+            let last = match delivery {
+                Ok(Some(report)) => {
+                    self.report.event("delivery", &report)?;
+                    if let Some(baseline) = baseline {
+                        let regressions = expected.regressions(baseline, &report);
+                        ensure!(
+                            regressions.is_empty(),
+                            "{alias}/{destination} delivery regressed: {}",
+                            regressions.join("; ")
+                        );
+                    }
+                    let unmet = expected.unmet(&report);
+                    if unmet.is_empty() {
+                        return Ok(report);
+                    }
+                    unmet.join("; ")
+                }
+                Ok(None) => "no delivery report".into(),
+                Err(error) => format!("{error:#}"),
+            };
+            ensure!(
+                Instant::now() < deadline,
+                "{alias}/{destination} delivery did not meet expectations in {seconds}s; last: {last}"
+            );
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
     }
 
     async fn apply(
@@ -1122,6 +1223,80 @@ impl Bench {
     }
 }
 
+struct DeliveryExpectation {
+    redundancy_ready: Option<bool>,
+    hold_ms: Option<[u64; 2]>,
+    max_new_unrecovered: Option<u64>,
+    max_age_growth_ms: Option<u64>,
+    max_age_shift_ms: Option<u64>,
+}
+
+impl DeliveryExpectation {
+    fn unmet(&self, report: &Value) -> Vec<String> {
+        let mut unmet = Vec::new();
+        if let Some(expected) = self.redundancy_ready
+            && report["redundancy_ready"].as_bool() != Some(expected)
+        {
+            unmet.push(format!(
+                "redundancy_ready is {}, expected {expected}",
+                report["redundancy_ready"]
+            ));
+        }
+        if let Some([minimum, maximum]) = self.hold_ms {
+            let hold_ms = report["hold_us"].as_u64().map(|hold| hold / 1_000);
+            if hold_ms.is_none_or(|hold| !(minimum..=maximum).contains(&hold)) {
+                unmet.push(format!(
+                    "hold is {hold_ms:?} ms, expected {minimum} to {maximum} ms"
+                ));
+            }
+        }
+        unmet
+    }
+
+    fn regressions(&self, baseline: &Value, report: &Value) -> Vec<String> {
+        let mut regressions = Vec::new();
+        let unrecovered = |report: &Value| report["counters"]["unrecovered"].as_u64().unwrap_or(0);
+        if let Some(limit) = self.max_new_unrecovered {
+            let new = unrecovered(report).saturating_sub(unrecovered(baseline));
+            if new > limit {
+                regressions.push(format!("{new} new unrecovered records, limit {limit}"));
+            }
+        }
+        if let Some(limit) = self.max_age_growth_ms {
+            let age = |report: &Value| report["maximum_release_age_us"].as_u64();
+            match (age(baseline), age(report)) {
+                (Some(before), Some(after)) => {
+                    let growth = after.saturating_sub(before) / 1_000;
+                    if growth > limit {
+                        regressions.push(format!(
+                            "maximum release age grew {growth} ms to {} ms, limit {limit} ms",
+                            after / 1_000
+                        ));
+                    }
+                }
+                _ => regressions.push("release ages are not reported".into()),
+            }
+        }
+        if let Some(limit) = self.max_age_shift_ms {
+            let age = |report: &Value| report["latest_release_age_us"].as_u64();
+            match (age(baseline), age(report)) {
+                (Some(before), Some(after)) => {
+                    let shift = before.abs_diff(after) / 1_000;
+                    if shift > limit {
+                        regressions.push(format!(
+                            "latest release age moved {shift} ms from {} ms to {} ms, limit {limit} ms",
+                            before / 1_000,
+                            after / 1_000
+                        ));
+                    }
+                }
+                _ => regressions.push("latest release ages are not reported".into()),
+            }
+        }
+        regressions
+    }
+}
+
 pub fn media_url(endpoint: &read::EndpointAddr, spec: &StreamTransport) -> Result<String> {
     let StreamTransport::Srt(spec) = spec else {
         bail!("bench media tools currently require SRT external endpoints")
@@ -1287,6 +1462,30 @@ mod tests {
                 .unwrap()
                 .1,
             "200000"
+        );
+    }
+
+    #[test]
+    fn delivery_expectations_wait_for_state_and_fail_on_regressions() {
+        let expected = DeliveryExpectation {
+            redundancy_ready: Some(true),
+            hold_ms: Some([40, 80]),
+            max_new_unrecovered: Some(0),
+            max_age_growth_ms: Some(20),
+            max_age_shift_ms: Some(15),
+        };
+        let baseline = json!({"redundancy_ready": true, "hold_us": 61_000, "maximum_release_age_us": 300_000, "latest_release_age_us": 290_000, "counters": {"unrecovered": 2}});
+        assert!(expected.unmet(&baseline).is_empty());
+        assert!(expected.regressions(&baseline, &baseline).is_empty());
+        let degraded = json!({"redundancy_ready": false, "hold_us": 20_000, "maximum_release_age_us": 361_000, "latest_release_age_us": 230_000, "counters": {"unrecovered": 5}});
+        assert_eq!(expected.unmet(&degraded).len(), 2);
+        assert_eq!(
+            expected.regressions(&baseline, &degraded),
+            vec![
+                "3 new unrecovered records, limit 0".to_string(),
+                "maximum release age grew 61 ms to 361 ms, limit 20 ms".to_string(),
+                "latest release age moved 60 ms from 290 ms to 230 ms, limit 15 ms".to_string(),
+            ]
         );
     }
 

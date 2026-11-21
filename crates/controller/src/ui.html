@@ -387,6 +387,7 @@ function renderStreams(streams) {
         `${d.id}: ${d.delivery.selected_latency_ms == null ? d.delivery.state : d.delivery.selected_latency_ms + " ms"}` +
         ` · timing ${d.delivery.timing_ready ? "ready" : d.delivery.reason}` +
         ` · redundancy ${d.delivery.redundancy_ready ? "ready" : "degraded"}` +
+        (d.delivery.hold_us == null ? "" : ` · hold ${Math.round(d.delivery.hold_us / 1000)} of ${Math.round((d.delivery.skew_us ?? 0) / 1000)} ms skew`) +
         ` · released ${d.delivery.counters.released}, missed ${d.delivery.counters.unrecovered}, late copies ${d.delivery.counters.late_arrivals}`)),
       stream.hops.length ? renderPath(stream) : null,
     )

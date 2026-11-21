@@ -431,6 +431,7 @@ impl Merger {
     pub fn released(&mut self, record: &Record, clock: ClockSample) {
         let age_us = clock.tai_ns.saturating_sub(record.origin_tai_ns) / 1_000;
         self.report.counters.released += 1;
+        self.report.latest_release_age_us = Some(age_us);
         self.report.minimum_release_age_us = Some(
             self.report
                 .minimum_release_age_us
@@ -555,6 +556,7 @@ mod tests {
         assert_eq!(report.counters.duplicates, 1);
         assert_eq!(report.minimum_release_age_us, Some(500_000));
         assert_eq!(report.maximum_release_age_us, Some(500_000));
+        assert_eq!(report.latest_release_age_us, Some(500_000));
         assert!(report.timing_ready);
     }
 

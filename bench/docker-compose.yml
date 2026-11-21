@@ -7,6 +7,19 @@ x-connect: &connect
     dockerfile: bench/Dockerfile
   restart: unless-stopped
 
+x-native: &native
+  <<: *connect
+  command: ["connect-node", "--config", "/etc/connect/node.yaml"]
+  depends_on:
+    tls-certs:
+      condition: service_completed_successfully
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://127.0.0.1:8191/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 5s
+
 x-media: &media
   image: linuxserver/ffmpeg:latest
   restart: "no"
@@ -439,6 +452,70 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
+
+  native-1:
+    <<: *native
+    container_name: oc-native-1
+    labels:
+      open-connect.bench.site: node1
+      open-connect.bench.project: oc-bench
+    environment:
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_NATIVE_1_TOKEN:-native-node-1.0.bc39275089fe0bcbf283765cc174f732aaff2cfe3215021d00080531fce15106}
+      SSL_CERT_FILE: /tls/ca.pem
+    volumes:
+      - ./config/native-1.yaml:/etc/connect/node.yaml:ro
+      - ./tls/public:/tls:ro
+    networks:
+      net_node1:
+        ipv4_address: 10.97.26.12
+
+  native-2:
+    <<: *native
+    container_name: oc-native-2
+    labels:
+      open-connect.bench.site: node2
+      open-connect.bench.project: oc-bench
+    environment:
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_NATIVE_2_TOKEN:-native-node-2.0.5d7b7b9445bb74dbd1e6c0e02b6276aa74b01aa1d83e956db418b00054982292}
+      SSL_CERT_FILE: /tls/ca.pem
+    volumes:
+      - ./config/native-2.yaml:/etc/connect/node.yaml:ro
+      - ./tls/public:/tls:ro
+    networks:
+      net_node2:
+        ipv4_address: 10.97.27.12
+
+  native-3:
+    <<: *native
+    container_name: oc-native-3
+    labels:
+      open-connect.bench.site: node3
+      open-connect.bench.project: oc-bench
+    environment:
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_NATIVE_3_TOKEN:-native-node-3.0.1d9d92cd7aa54d1bc3def1cc85bb4ba8be9528fe2e0abc903f178174643204bc}
+      SSL_CERT_FILE: /tls/ca.pem
+    volumes:
+      - ./config/native-3.yaml:/etc/connect/node.yaml:ro
+      - ./tls/public:/tls:ro
+    networks:
+      net_node3:
+        ipv4_address: 10.97.29.12
+
+  native-4:
+    <<: *native
+    container_name: oc-native-4
+    labels:
+      open-connect.bench.site: node4
+      open-connect.bench.project: oc-bench
+    environment:
+      CONNECT_SOUTHBOUND_TOKEN: ${CONNECT_NATIVE_4_TOKEN:-native-node-4.0.8ea989d4b61089b1e03a237c3664e66a88fceb16a150b3189ec41ba64229bc7a}
+      SSL_CERT_FILE: /tls/ca.pem
+    volumes:
+      - ./config/native-4.yaml:/etc/connect/node.yaml:ro
+      - ./tls/public:/tls:ro
+    networks:
+      net_node4:
+        ipv4_address: 10.97.30.12
 
   browser:
     build:

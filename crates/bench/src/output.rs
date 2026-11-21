@@ -568,6 +568,15 @@ fn step_label(step: &Step) -> String {
         Step::Unchanged { snapshot } => format!("verify snapshot {snapshot} unchanged"),
         Step::Delete { stream } => format!("delete {stream} and wait for its hops to disappear"),
         Step::Wait { seconds } => format!("wait {seconds}s"),
+        Step::Delivery {
+            stream,
+            destination,
+            since,
+            ..
+        } => match since {
+            Some(since) => format!("verify {stream}/{destination} delivery since {since}"),
+            None => format!("verify {stream}/{destination} delivery"),
+        },
     }
 }
 
@@ -576,7 +585,8 @@ fn step_clock(active: &ActiveStep, now: Instant) -> String {
     let limit = match &active.step {
         Step::Await { timeout_secs, .. }
         | Step::Flows { timeout_secs, .. }
-        | Step::AwaitControl { timeout_secs, .. } => Some((*timeout_secs, "timeout")),
+        | Step::AwaitControl { timeout_secs, .. }
+        | Step::Delivery { timeout_secs, .. } => Some((*timeout_secs, "timeout")),
         Step::Observe { seconds, .. } => Some((*seconds, "minimum")),
         Step::Wait { seconds } => Some((*seconds, "wait")),
         _ => None,
