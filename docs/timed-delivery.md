@@ -1,7 +1,7 @@
 # Timed delivery and redundant paths
 
 The native `connect-node` runtime implements fixed timed release, automatic
-calibration and low-latency first-copy release over encrypted SRT links. Strom and browser nodes do not implement
+calibration and low-latency first-copy release over encrypted SRT and RTP links. Strom and browser nodes do not implement
 these roles. Media stays in the nodes, outside the controller.
 
 ## Contract and manifest
@@ -102,26 +102,55 @@ delivery:
 
 `low_latency` releases each record as soon as its first copy arrives, in
 sequence order, instead of holding it to a scheduled delay. It needs no clock
-domain. `max_latency_ms` is a ceiling on SRT buffering that open-connect
-configures, from the source's ingress listener to the receiver's consumer
-listener. Propagation delay, encoding and decoding are outside it.
+domain. `max_latency_ms` is a ceiling on the buffering and waiting that
+open-connect configures, from the source's ingress listener to the receiver's
+consumer listener. Propagation delay, encoding and decoding are outside it.
 
 The controller sets the consumer listener to 20 ms, and the ingress listener to
-20 ms unless the source names `srt.latency`. It reserves 10 ms for the receiver
-to wait on a missing record, and splits the rest evenly across each path's
-internal links. A path whose links would get less than 20 ms each is refused
-with `latency_budget_infeasible`. An explicit destination `srt.latency` sets
-every internal link instead and must fit the ceiling.
+20 ms unless the source names `srt.latency`. Between native nodes that offer
+them, internal links are [RTP links](#rtp-links), which hold nothing back; the
+receiver waits for a missing record for 10 ms plus each link's FEC window on the
+path, 50 ms for a path through one relay. When that wait does not fit the
+ceiling, or a link has to be SRT, the controller reserves 10 ms for the wait and
+splits the rest evenly across each path's internal SRT links. A path whose
+links would get less than 20 ms each is refused with
+`latency_budget_infeasible`. An explicit destination `srt.latency` keeps every
+internal link SRT at that latency, and it must fit the ceiling.
 
 A `low_latency` destination without `via` always tries a second path, which
 does not require `paths: 2`. With one path it stays `flowing`, and
 `redundancy_ready` names how many attempted paths carry media. `paths: 2` makes
 redundancy required, as for the other modes.
 
-When the next record in sequence is missing, the receiver waits up to 10 ms for
-the other path's copy, then skips it and counts it as unrecovered. A copy that
+When the next record in sequence is missing, the receiver waits up to that wait
+for the other path's copy or its recovery, then skips it and counts it as
+unrecovered. A copy that
 arrives after its record was skipped counts as late. Release ages are reported
 only while the origin and receiver share a clock domain.
+
+### RTP links
+
+SRT recovers loss by retransmission, which needs a buffer of several round
+trips on every link. An RTP link recovers loss with forward error correction
+instead, so its cost does not grow with the round trip:
+
+- Each datagram carries an RTP header, a 32-bit extension of its sequence
+  number and a ChaCha20-Poly1305 sealed payload. Keys for each direction come
+  from the link passphrase through HKDF-SHA256.
+- The sender closes a group after `fec.originals` records or `fec.window_ms`,
+  whichever comes first, and sends `fec.recovery` Reed-Solomon parity packets
+  for it. The controller plans 10, 2 and 20 ms: any two losses in a group are
+  recovered, at most 20 ms after the group opened.
+- Records are forwarded the moment they arrive. Only a recovered record waits
+  for its group's parity.
+- The caller sends a keepalive every 100 ms, so a listener can send toward a
+  caller behind NAT. A listener follows an authenticated caller to a new address,
+  and moves to a new caller session only after the current one has been silent
+  for a second.
+
+A link reports the packets it saw missing in `packets_received_lost` and the
+ones parity restored in `packets_recovered`. Both paths of a destination use
+the same link transport; a receiver merges two RTP links or two SRT links.
 
 ### Path alignment
 

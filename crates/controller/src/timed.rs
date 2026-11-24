@@ -122,9 +122,30 @@ pub fn decorate(hop: &mut DesiredHop, origin: &TimedHop, destination: Option<&St
 }
 
 pub fn set_payload(socket: &mut SocketSpec, payload: PayloadKind) {
-    if let SocketSpec::Srt(socket) = socket {
-        socket.params_mut().payload = payload;
+    match socket {
+        SocketSpec::Srt(socket) => socket.params_mut().payload = payload,
+        SocketSpec::Rtp(socket) => socket.params_mut().payload = payload,
+        _ => {}
     }
+}
+
+pub fn check_wait_budget(
+    destination: &StreamDestination,
+    edges_ms: u32,
+    wait_ms: u32,
+) -> Result<(), PlacementError> {
+    let Some(policy) = &destination.delivery else {
+        return Ok(());
+    };
+    let configured = u64::from(edges_ms) + u64::from(wait_ms);
+    if configured > u64::from(policy.maximum_ms()) {
+        return Err(PlacementError::LatencyBudget {
+            destination: destination.id.clone(),
+            configured_ms: configured,
+            budget_ms: policy.maximum_ms(),
+        });
+    }
+    Ok(())
 }
 
 pub fn profile_matches(hop: &DesiredHop, profile: &HopProfile) -> bool {

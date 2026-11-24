@@ -31,7 +31,7 @@ capabilities:
 
 | Field | Meaning |
 |---|---|
-| `ingress` | One transport (`srt`, `rist`, `whip`, `whep`) with the socket `roles` it supports, `{ transport: webrtc }` with no roles, or `input`: one of the node's [inputs](#inputs-and-outputs). |
+| `ingress` | One transport (`srt`, `rist`, `rtp`, `whip`, `whep`) with the socket `roles` it supports, `{ transport: webrtc }` with no roles, or `input`: one of the node's [inputs](#inputs-and-outputs). |
 | `egress` | One transport, or a list of two or more that the hop's egresses may mix, or `output`: one of the node's [outputs](#inputs-and-outputs). |
 | `max_egresses` | Optional limit on egresses per hop. |
 | `accepts` | Optional. The media the ingress takes, in the shape of a destination's [`accepts`](streams.md#formats). |
@@ -59,7 +59,7 @@ carries. Absent means unknown, and the hops carry both.
 
 | Node | Profiles |
 |---|---|
-| Native | `srt-forward`, `rtp-to-srt`, `srt-to-rtp`, `srt-timed-origin`, `srt-timed-forward`, `srt-timed-receiver` |
+| Native | `srt-forward`, `rtp-to-srt`, `srt-to-rtp`, `srt-timed-origin`, `srt-timed-forward`, `rtp-timed-forward`, `srt-timed-receiver`, `rtp-timed-receiver` |
 | Strom | `srt-forward`, `whip-to-srt`, `srt-to-whep`, `whip-to-whep`, `srt-to-rist`, `rist-to-srt` |
 | Browser | `camera-to-whip`, `whep-to-display`, each with one egress |
 
@@ -181,9 +181,11 @@ topology:
 
 Attachment ids are local to the node. Network ids name routing domains shared
 between nodes. `dial: true` means the node can dial out from that attachment.
-`listeners` are what peers can reach: `srt` and `rist` take a `host` and a
-`port_range`, and `whip` and `whep` a `base_url`. An attachment that dials and
-has no listeners is a node behind NAT.
+`listeners` are what peers can reach: `srt`, `rist` and `rtp` take a `host` and
+a `port_range`, and `whip` and `whep` a `base_url`. An attachment that dials and
+has no listeners is a node behind NAT. `rtp` is the native nodes' link for
+[low-latency delivery](timed-delivery.md#rtp-links); it is unrelated to the RTP
+[inputs and outputs](#rtp-inputs-and-outputs) a node offers locally.
 
 RIST is the simple profile: the receiver binds an even port for RTP and the next
 one for RTCP, and the sender pushes to both. SRT and RIST can share a port
@@ -278,7 +280,8 @@ A link is possible when one end offers `connect` and has a dialing attachment,
 and the other offers `listen` with a listener on the same network. Which
 transports a node supports comes only from its hop profiles. Of the possible
 links, the controller takes the lowest transport, network, attachment, address,
-URL and port. RIST comes after SRT, WHIP and WHEP, and only for a stream that
+URL and port. For a `low_latency` destination without an explicit `srt.latency`,
+RTP links come first. RIST comes after SRT, WHIP and WHEP, and only for a stream that
 [allows cleartext links](streams.md#cleartext-links). Only the downstream end of
 a RIST link can listen, so a receiver behind NAT cannot take RIST.
 

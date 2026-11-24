@@ -127,8 +127,9 @@ destination's status covers both paths, so one path down reads `degraded`.
 
 ## Encryption
 
-SRT links between nodes are always encrypted with keys the controller derives
-(see [Security](security.md#srt-encryption)). RIST links are not (see
+SRT and RTP links between nodes are always encrypted with keys the controller
+derives (see [Security](security.md#srt-encryption) and
+[RTP links](timed-delivery.md#rtp-links)). RIST links are not (see
 [Cleartext links](#cleartext-links)). A socket that something outside
 open-connect dials, or that dials out to it, takes its key from `passphrase` on
 the `srt` endpoint: the source ingress a producer dials, the output a consumer

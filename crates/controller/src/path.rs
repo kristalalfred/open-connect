@@ -3,12 +3,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use connect_core::{
-    DesiredEgress, DesiredHop, DestinationEndpoint, EndpointAddr, HOP_ID_PREFIX, HopConditions,
-    HopEndpointClass, HopRole, HopState, HopStatus, LinkCondition, LocalEnd, LocalEndpoint,
-    LocalSocket, NetworkAttachment, NodeDescriptor, NodeStatus, Passphrase, Path, PathStatus,
-    PeerAttempt, PeerLinkId, PortRange, RemoteAddr, ResolvedAddr, RistListener, RistSocket,
-    SignallingEndpoint, SignallingTransport, SocketRole, SocketSpec, SrtParams, SrtSocket,
-    StreamDefinition, StreamEndpoints, StreamTransport, Track, Transport, roll_up_path,
+    DesiredEgress, DesiredHop, DestinationEndpoint, EndpointAddr, FecParams, HOP_ID_PREFIX,
+    HopConditions, HopEndpointClass, HopRole, HopState, HopStatus, LinkCondition, LocalEnd,
+    LocalEndpoint, LocalSocket, NetworkAttachment, NodeDescriptor, NodeStatus, Passphrase, Path,
+    PathStatus, PeerAttempt, PeerLinkId, PortRange, RemoteAddr, ResolvedAddr, RistListener,
+    RistSocket, RtpParams, RtpSocket, SignallingEndpoint, SignallingTransport, SocketRole,
+    SocketSpec, SrtParams, SrtSocket, StreamDefinition, StreamEndpoints, StreamTransport, Track,
+    Transport, roll_up_path,
 };
 
 use crate::keys::LinkKeys;
@@ -344,6 +345,7 @@ impl HopReports {
                         .map(|srt| srt.host.as_str())
                         .into_iter()
                         .chain(listeners.rist.as_ref().map(|rist| rist.host.as_str()))
+                        .chain(listeners.rtp.as_ref().map(|rtp| rtp.host.as_str()))
                 })
                 .chain(["0.0.0.0"])
                 .collect();
@@ -541,6 +543,16 @@ impl PortAllocator {
             .ok_or_else(|| PlacementError::NoPortRange {
                 node: node.id.clone(),
             })?;
+        self.claim_range_at(node, range, key, at)
+    }
+
+    fn claim_range_at(
+        &mut self,
+        node: &NodeDescriptor,
+        range: PortRange,
+        key: &str,
+        at: Option<&SocketAt>,
+    ) -> Result<u16, PlacementError> {
         let count = u32::from(range.span()) + 1;
         let preferred = preferred_offset(range, key);
         let rist: Vec<PortRange> = node
@@ -624,6 +636,9 @@ impl PortAllocator {
                 PortListener::Rist(listener, at) => {
                     let port = trial.claim_rist_at(node, listener, "", Some(at)).ok()?;
                     claimed.extend([port, port + 1]);
+                }
+                PortListener::Rtp(range, at) => {
+                    claimed.push(trial.claim_range_at(node, *range, "", Some(at)).ok()?);
                 }
             }
         }
@@ -981,6 +996,7 @@ fn derive_on(
         }
         let branch_id = destination.id.clone();
         let dest = read_endpoint(&destination.endpoint)?;
+        relays.fec = rtp_fec(destination, &dest);
 
         let second_path_relays = if destination.attempted_paths() > 1 {
             relays.second_path_relays(&stream.name, &destination.id)
@@ -998,7 +1014,7 @@ fn derive_on(
             &second_path_relays,
         )?;
         peer_routes.extend(chain.peer_routes.iter().cloned());
-        let latency = link_latency(destination, &dest, chain.bridges.len() + 1, ingress_ms)?;
+        let latency = link_spec(destination, &dest, chain.bridges.len() + 1, ingress_ms)?;
 
         let mut hops: Vec<DesiredHop> = Vec::with_capacity(chain.bridges.len() + 1);
         let mut upstream = LinkEnd {
@@ -1058,7 +1074,7 @@ fn derive_on(
                 let socket = SocketSpec::Srt(SrtSocket::Connect {
                     host: remote.host.clone(),
                     port: remote.port,
-                    params: srt_params(latency, dest.passphrase.cloned()),
+                    params: srt_params(latency.latency, dest.passphrase.cloned()),
                 });
                 push_egress(&mut sender_egresses, &mut hops, &branch_id, socket);
                 if destination.attempted_paths() > 1 {
@@ -1144,11 +1160,16 @@ fn derive_on(
             }
         }
 
+        let ingresses: Vec<&SocketSpec> = hops.iter().map(|hop| &hop.ingress).collect();
+        let wait_ms = path_wait(destination, &dest, &ingresses, latency, ingress_ms)?;
         if destination.delivery.is_some()
             && let Some(origin) = &timing
         {
             for hop in &mut hops {
                 crate::timed::decorate(hop, origin, Some(destination));
+                if hop.role == HopRole::Receiver {
+                    raise_wait(hop, wait_ms);
+                }
             }
             for egress in sender_egresses
                 .iter_mut()
@@ -1374,6 +1395,88 @@ fn consumer_latency(destination: &connect_core::StreamDestination) -> u32 {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct LinkSpec {
+    latency: u32,
+    fec: Option<FecParams>,
+}
+
+impl LinkSpec {
+    fn srt(latency: u32) -> Self {
+        Self { latency, fec: None }
+    }
+}
+
+fn rtp_fec(
+    destination: &connect_core::StreamDestination,
+    endpoint: &Endpoint,
+) -> Option<FecParams> {
+    matches!(
+        destination.delivery,
+        Some(connect_core::DeliveryPolicy::LowLatency { .. })
+    )
+    .then_some(())
+    .filter(|()| endpoint.latency.is_none())
+    .map(|()| FecParams::default())
+}
+
+fn rtp_wait(fec: FecParams, links: usize) -> u32 {
+    connect_core::delivery::LOW_LATENCY_MERGE_WAIT_MS
+        + u32::try_from(links).unwrap_or(u32::MAX) * u32::from(fec.window_ms)
+}
+
+fn link_spec(
+    destination: &connect_core::StreamDestination,
+    endpoint: &Endpoint,
+    links: usize,
+    ingress_ms: u32,
+) -> Result<LinkSpec, PlacementError> {
+    let srt = link_latency(destination, endpoint, links, ingress_ms);
+    let edges_ms = ingress_ms + consumer_latency(destination);
+    match rtp_fec(destination, endpoint) {
+        Some(fec)
+            if crate::timed::check_wait_budget(destination, edges_ms, rtp_wait(fec, links))
+                .is_ok() =>
+        {
+            Ok(LinkSpec {
+                latency: srt.unwrap_or(LOW_LATENCY_LINK_FLOOR_MS),
+                fec: Some(fec),
+            })
+        }
+        _ => srt.map(LinkSpec::srt),
+    }
+}
+
+fn path_wait(
+    destination: &connect_core::StreamDestination,
+    endpoint: &Endpoint,
+    ingresses: &[&SocketSpec],
+    link: LinkSpec,
+    ingress_ms: u32,
+) -> Result<Option<u32>, PlacementError> {
+    let Some(fec) = link.fec else {
+        return Ok(None);
+    };
+    let rtp = ingresses
+        .iter()
+        .filter(|socket| matches!(socket, SocketSpec::Rtp(_)))
+        .count();
+    if rtp < ingresses.len() {
+        link_latency(destination, endpoint, ingresses.len(), ingress_ms)?;
+    }
+    Ok((rtp > 0).then(|| rtp_wait(fec, rtp)))
+}
+
+fn raise_wait(hop: &mut DesiredHop, wait_ms: Option<u32>) {
+    if let (Some(timing), Some(wait_ms)) = (&mut hop.delivery, wait_ms) {
+        timing.wait_ms = Some(
+            timing
+                .wait_ms
+                .map_or(wait_ms, |current| current.max(wait_ms)),
+        );
+    }
+}
+
 fn link_latency(
     destination: &connect_core::StreamDestination,
     endpoint: &Endpoint,
@@ -1421,6 +1524,8 @@ fn place_second_path(
         nodes
     };
     relays.reachable.clear();
+    let endpoint = read_endpoint(&first.destination.endpoint)?;
+    relays.fec = rtp_fec(first.destination, &endpoint);
     let receiver_node = find_node(nodes, &first.receiver.node_id).ok_or_else(|| {
         PlacementError::NodeNotRegistered {
             node: first.receiver.node_id.clone(),
@@ -1480,9 +1585,9 @@ fn place_second_path(
             role: HopRole::Bridge,
         })
         .collect();
-    let latency = link_latency(
+    let latency = link_spec(
         first.destination,
-        &read_endpoint(&first.destination.endpoint)?,
+        &endpoint,
         bridges.len() + 1,
         first.ingress_ms,
     )?;
@@ -1545,8 +1650,21 @@ fn place_second_path(
         }
     }
     sender_hop.egresses.extend(sender_egresses);
+    let ingresses: Vec<&SocketSpec> = new_hops
+        .iter()
+        .map(|hop| &hop.ingress)
+        .chain([&link.downstream])
+        .collect();
+    let wait_ms = path_wait(
+        first.destination,
+        &endpoint,
+        &ingresses,
+        latency,
+        first.ingress_ms,
+    )?;
     let mut receiver_hop = hops[receiver_index].clone();
     receiver_hop.merge_ingress = Some(link.downstream);
+    raise_wait(&mut receiver_hop, wait_ms);
     if let Some(timing) = &first.timing {
         if let Some(socket) = &mut receiver_hop.merge_ingress {
             crate::timed::set_payload(socket, connect_core::PayloadKind::ConnectTimedV1);
@@ -1690,7 +1808,7 @@ fn select_profile(hop: &DesiredHop, nodes: &[NodeDescriptor]) -> Result<String, 
 fn plan_hop(
     upstream: &LinkEnd,
     hop: &ChainHop,
-    latency: u32,
+    latency: LinkSpec,
     nodes: &[NodeDescriptor],
     ports: &mut PortAllocator,
     keys: (&LinkKeys, &PeerPlanning),
@@ -1852,6 +1970,7 @@ struct RelayCache<'p> {
     reachable: HashMap<Station, Vec<(String, Listened)>>,
     reports: Arc<HopReports>,
     peers: &'p PeerPlanning,
+    fec: Option<FecParams>,
 }
 
 impl<'p> RelayCache<'p> {
@@ -1860,6 +1979,7 @@ impl<'p> RelayCache<'p> {
             reachable: HashMap::new(),
             reports,
             peers,
+            fec: None,
         }
     }
 
@@ -1904,8 +2024,13 @@ impl<'p> RelayCache<'p> {
                 .iter()
                 .filter(|node| node.status != NodeStatus::Offline && node.id != upstream.node_id)
                 .filter_map(|node| {
-                    listened_link(upstream, &Station::relay(&node.id), nodes)
-                        .map(|link| (node.id.clone(), link))
+                    listened_link(
+                        upstream,
+                        &Station::relay(&node.id),
+                        nodes,
+                        self.fec.is_some(),
+                    )
+                    .map(|link| (node.id.clone(), link))
                 })
                 .collect()
         })
@@ -1924,7 +2049,7 @@ fn relay_before(
     relays: &mut RelayCache,
 ) -> Result<Option<PeerRoute>, PlacementError> {
     let upstream = chain.last().unwrap_or(source).clone();
-    let failure = match station_link(&upstream, next, nodes) {
+    let failure = match station_link(&upstream, next, nodes, relays.fec.is_some()) {
         Ok(LinkChoice::Listened(_)) => return Ok(None),
         Ok(LinkChoice::Webrtc) => None,
         Err(failure) => Some(failure),
@@ -2010,13 +2135,14 @@ fn pick_relay<'n>(
     (bridge, branch): (&str, &str),
 ) -> Option<Result<RelayPick<'n>, PlacementError>> {
     let keep = relays.running(bridge).to_vec();
+    let rtp = relays.fec.is_some();
     let candidates = relays
         .reachable_from(upstream, nodes)
         .iter()
         .filter(|(id, _)| id != &downstream.node_id && !avoid.contains(id))
         .filter_map(|(id, ingress)| {
             let node = find_node(nodes, id)?;
-            let egress = listened_link(&Station::relay(&node.id), downstream, nodes)?;
+            let egress = listened_link(&Station::relay(&node.id), downstream, nodes, rtp)?;
             node.capabilities
                 .hop_profiles
                 .iter()
@@ -2050,6 +2176,7 @@ fn pick_relay<'n>(
 enum PortListener {
     Srt(NetworkAttachment, SocketAt),
     Rist(RistListener, SocketAt),
+    Rtp(PortRange, SocketAt),
 }
 
 fn relay_with_ports<'a>(
@@ -2224,7 +2351,13 @@ impl Listened {
                 .rist
                 .clone()
                 .map(|listener| PortListener::Rist(listener, at)),
-            Transport::Whip | Transport::Whep | Transport::Rtp => None,
+            Transport::Rtp => self
+                .attachment
+                .listeners
+                .rtp
+                .as_ref()
+                .map(|listener| PortListener::Rtp(listener.port_range, at)),
+            Transport::Whip | Transport::Whep => None,
         }
     }
 }
@@ -2243,9 +2376,14 @@ struct PlannedLink {
 fn link_transport(
     upstream: &ResolvedEnd<'_>,
     downstream: &ResolvedEnd<'_>,
+    rtp: bool,
 ) -> Result<LinkChoice, LinkFailure> {
     let mut complementary = false;
-    for transport in TRANSPORT_PREFERENCE {
+    let preference = rtp
+        .then_some(Transport::Rtp)
+        .into_iter()
+        .chain(TRANSPORT_PREFERENCE);
+    for transport in preference {
         let listeners: &[Listener] = match transport {
             Transport::Srt | Transport::Rtp => &[Listener::Downstream, Listener::Upstream],
             Transport::Whip | Transport::Rist => &[Listener::Downstream],
@@ -2302,18 +2440,20 @@ fn station_link(
     upstream: &Station,
     downstream: &Station,
     nodes: &[NodeDescriptor],
+    rtp: bool,
 ) -> Result<LinkChoice, LinkFailure> {
     let up = resolve_station(upstream, nodes)?;
     let down = resolve_station(downstream, nodes)?;
-    link_transport(&up, &down)
+    link_transport(&up, &down, rtp)
 }
 
 fn listened_link(
     upstream: &Station,
     downstream: &Station,
     nodes: &[NodeDescriptor],
+    rtp: bool,
 ) -> Option<Listened> {
-    match station_link(upstream, downstream, nodes) {
+    match station_link(upstream, downstream, nodes, rtp) {
         Ok(LinkChoice::Listened(link)) => Some(*link),
         Ok(LinkChoice::Webrtc) | Err(_) => None,
     }
@@ -2332,14 +2472,14 @@ fn has_listener(attachment: &NetworkAttachment, transport: Transport) -> bool {
 fn plan_link(
     upstream: &LinkEnd,
     downstream: &LinkEnd,
-    latency: u32,
+    link: LinkSpec,
     nodes: &[NodeDescriptor],
     ports: &mut PortAllocator,
     (keys, peers): (&LinkKeys, &PeerPlanning),
 ) -> Result<PlannedLink, PlacementError> {
     let up = resolve_station(upstream.station, nodes)?;
     let down = resolve_station(downstream.station, nodes)?;
-    let choice = match link_transport(&up, &down).map_err(|failure| {
+    let choice = match link_transport(&up, &down, link.fec.is_some()).map_err(|failure| {
         failure.into_error(&upstream.station.node_id, &downstream.station.node_id)
     })? {
         LinkChoice::Listened(choice) => *choice,
@@ -2372,6 +2512,40 @@ fn plan_link(
             listen_at,
             ports,
         )?,
+        None if choice.transport == Transport::Rtp => {
+            let listener = choice
+                .attachment
+                .listeners
+                .rtp
+                .as_ref()
+                .expect("RTP link choice has an RTP listener");
+            let port = ports.claim_range_at(
+                host.node,
+                listener.port_range,
+                downstream.hop_id,
+                Some(listen_at),
+            )?;
+            let ends = [
+                upstream.station.node_id.as_str(),
+                downstream.station.node_id.as_str(),
+            ];
+            let params = RtpParams {
+                payload: connect_core::PayloadKind::Raw,
+                passphrase: Some(keys.link(downstream.hop_id, ends)),
+                fec: link.fec.unwrap_or_default(),
+            };
+            (
+                SocketSpec::Rtp(RtpSocket::Listen {
+                    port,
+                    params: params.clone(),
+                }),
+                SocketSpec::Rtp(RtpSocket::Connect {
+                    host: listener.host.clone(),
+                    port,
+                    params,
+                }),
+            )
+        }
         None => {
             let listener = choice
                 .attachment
@@ -2389,7 +2563,7 @@ fn plan_link(
                 upstream.station.node_id.as_str(),
                 downstream.station.node_id.as_str(),
             ];
-            let params = srt_params(latency, Some(keys.link(downstream.hop_id, ends)));
+            let params = srt_params(link.latency, Some(keys.link(downstream.hop_id, ends)));
             (
                 SocketSpec::Srt(SrtSocket::Listen {
                     port,

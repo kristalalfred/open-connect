@@ -19,6 +19,8 @@ mod relay_choice_tests;
 #[cfg(test)]
 mod rist_tests;
 #[cfg(test)]
+mod rtp_link_tests;
+#[cfg(test)]
 mod scale_tests;
 #[cfg(test)]
 mod second_path_tests;
