@@ -1,0 +1,43 @@
+name: loss-on-both-paths
+description: An aligned low-latency stream over RTP links loses no record while both paths drop packets at random at the same time.
+steps:
+  - do: netem
+    node: node2
+    args: [delay, 30ms]
+  - do: apply
+    file: ../manifests/aligned.yaml
+    stream: main
+  - do: drive
+    stream: main
+  - do: await
+    stream: main
+    status: flowing
+  - do: delivery
+    stream: main
+    destination: studio
+    redundancy_ready: true
+    mark: clean
+  - do: observe
+    receivers: [main/studio]
+    seconds: 16
+    max_gap_ms: 1000
+    during:
+      - do: netem
+        node: node1
+        args: [loss, "5%"]
+      - do: netem
+        node: node2
+        args: [delay, 30ms, loss, "5%"]
+      - do: wait
+        seconds: 12
+      - do: delivery
+        stream: main
+        destination: studio
+        since: clean
+        redundancy_ready: true
+        max_new_unrecovered: 0
+      - do: clear_netem
+        node: node1
+      - do: netem
+        node: node2
+        args: [delay, 30ms]

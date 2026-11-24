@@ -11,6 +11,9 @@ node:
           srt:
             host: 10.97.27.12
             port_range: { start: 24000, end: 24099 }
+          rtp:
+            host: 10.97.27.12
+            port_range: { start: 24100, end: 24149 }
 clock:
   provider: shared_host
   domain: bench

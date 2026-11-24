@@ -110,7 +110,8 @@ Installed service image IDs are recorded separately.
 
 The corpus covers direct links, fan-out, concurrent feeds, controller
 failover, source reconnects, delay/loss, site partitions, relay replacement,
-encrypted endpoints, outages of the nginx edge, a media runtime restart, and strict
+encrypted endpoints, random loss on both paths of an aligned low-latency stream,
+outages of the nginx edge, a media runtime restart, and strict
 declared compatibility admission, blocking, removal and recovery. The local
 [declared-media evidence](evidence/declared-media.json) records decoded media
 and control-plane results separately from unit tests. It is not independent
