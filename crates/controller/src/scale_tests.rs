@@ -32,6 +32,7 @@ fn srt_listener(host: &str) -> NetworkListeners {
         }),
         whip: None,
         whep: None,
+        rtp: None,
         rist: None,
     }
 }

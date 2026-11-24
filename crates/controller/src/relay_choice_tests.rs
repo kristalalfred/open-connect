@@ -41,6 +41,7 @@ fn attachment(id: &str, network: &str, listener: Option<(&str, u16, u16)>) -> Ne
             }),
             whip: None,
             whep: None,
+            rtp: None,
             rist: None,
         },
     }

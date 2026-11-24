@@ -51,6 +51,7 @@ fn node(id: &str, network: &str) -> NodeDescriptor {
                     }),
                     whip: None,
                     whep: None,
+                    rtp: None,
                     rist: None,
                 },
             }],

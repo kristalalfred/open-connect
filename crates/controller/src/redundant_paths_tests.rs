@@ -47,6 +47,7 @@ fn attachment(id: &str, network: &str, host: Option<&str>) -> NetworkAttachment 
             }),
             whip: None,
             whep: None,
+            rtp: None,
             rist: None,
         },
     }

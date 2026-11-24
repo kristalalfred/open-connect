@@ -171,11 +171,13 @@ impl FirstCopy {
 
     pub fn reconfigure(
         &mut self,
+        wait_ms: u32,
         max_skew_ms: Option<u32>,
         input_paths: usize,
         requested_paths: usize,
     ) {
         assert!((1..=2).contains(&input_paths));
+        self.wait_ns = u64::from(wait_ms) * NS_PER_MS;
         self.input_paths = input_paths;
         self.requested_paths = requested_paths;
         match (&mut self.alignment, max_skew_ms) {

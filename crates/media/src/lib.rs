@@ -1,6 +1,8 @@
 pub mod clock;
 pub mod endpoint;
+pub mod fec;
 pub mod first_copy;
+pub mod link;
 pub mod merge;
 pub mod node;
 pub mod record;

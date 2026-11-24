@@ -78,6 +78,7 @@ fn attachment(
             }),
             whip: None,
             whep: None,
+            rtp: None,
             rist: rist.map(|(host, port_range)| RistListener {
                 host: host.to_string(),
                 port_range,

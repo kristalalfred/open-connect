@@ -289,6 +289,22 @@ pub fn validate_node(node: &DeclaredNode) -> Vec<ValidationIssue> {
                 ));
             }
         }
+        if let Some(listener) = &attachment.listeners.rtp {
+            if listener.host.trim().is_empty() {
+                issues.push(ValidationIssue::new(
+                    format!("{base}.listeners.rtp.host"),
+                    "blank",
+                    "RTP listener host must not be blank",
+                ));
+            }
+            if listener.port_range.start > listener.port_range.end {
+                issues.push(ValidationIssue::new(
+                    format!("{base}.listeners.rtp.port_range"),
+                    "invalid_range",
+                    "port range start must not exceed end",
+                ));
+            }
+        }
         if let Some(listener) = &attachment.listeners.rist {
             if listener.host.trim().is_empty() {
                 issues.push(ValidationIssue::new(

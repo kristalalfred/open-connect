@@ -59,6 +59,7 @@ fn listeners(host: &str, signalling: &str) -> NetworkListeners {
             base_url: format!("{signalling}/whep"),
         }),
         rist: None,
+        rtp: None,
     }
 }
 

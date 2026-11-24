@@ -117,19 +117,43 @@ fn validate(desired: &DesiredHop, settings: &Settings) -> anyhow::Result<()> {
         anyhow::ensure!(
             desired
                 .sockets()
-                .all(|socket| matches!(socket, SocketSpec::Srt(_))),
-            "native timed hops only carry SRT"
+                .all(|socket| matches!(socket, SocketSpec::Srt(_) | SocketSpec::Rtp(_))),
+            "native timed hops only carry SRT and RTP links"
         );
+        let carried = if matches!(desired.ingress, SocketSpec::Rtp(_)) {
+            "rtp"
+        } else {
+            "srt"
+        };
         let (profile, role) = match timing.role {
-            DeliveryRole::Origin => ("srt-timed-origin", connect_core::HopRole::Sender),
-            DeliveryRole::Forward => ("srt-timed-forward", connect_core::HopRole::Bridge),
-            DeliveryRole::Receiver => ("srt-timed-receiver", connect_core::HopRole::Receiver),
+            DeliveryRole::Origin => ("srt-timed-origin".to_owned(), connect_core::HopRole::Sender),
+            DeliveryRole::Forward => (
+                format!("{carried}-timed-forward"),
+                connect_core::HopRole::Bridge,
+            ),
+            DeliveryRole::Receiver => (
+                format!("{carried}-timed-receiver"),
+                connect_core::HopRole::Receiver,
+            ),
         };
         anyhow::ensure!(
             desired.profile_id == profile && desired.role == role && timing.epoch != 0,
             "invalid native timed profile, role or epoch"
         );
-        let framed = |socket: &SocketSpec| matches!(socket, SocketSpec::Srt(socket) if socket.params().payload == PayloadKind::ConnectTimedV1 && socket.params().passphrase.is_some());
+        let framed = |socket: &SocketSpec| match socket {
+            SocketSpec::Srt(socket) => {
+                socket.params().payload == PayloadKind::ConnectTimedV1
+                    && socket.params().passphrase.is_some()
+            }
+            SocketSpec::Rtp(socket) => {
+                socket.params().payload == PayloadKind::ConnectTimedV1
+                    && socket.params().passphrase.is_some()
+            }
+            _ => false,
+        };
+        let same_link = |socket: &SocketSpec| {
+            std::mem::discriminant(socket) == std::mem::discriminant(&desired.ingress)
+        };
         match timing.role {
             DeliveryRole::Origin => anyhow::ensure!(
                 raw(&desired.ingress) && desired.merge_ingress.is_none(),
@@ -143,7 +167,10 @@ fn validate(desired: &DesiredHop, settings: &Settings) -> anyhow::Result<()> {
             ),
             DeliveryRole::Receiver => anyhow::ensure!(
                 framed(&desired.ingress)
-                    && desired.merge_ingress.as_ref().is_none_or(framed)
+                    && desired
+                        .merge_ingress
+                        .as_ref()
+                        .is_none_or(|merge| framed(merge) && same_link(merge))
                     && desired.egresses.len() == 1
                     && raw(&desired.egresses[0].socket)
                     && usize::from(timing.paths) > usize::from(desired.merge_ingress.is_some()),
@@ -278,7 +305,14 @@ impl Actor {
                     merger.reconfigure(policy, count, requested);
                 }
                 (Some(Receiver::FirstCopy(receiver)), false) => {
-                    receiver.reconfigure(policy.max_skew_ms(), count, requested);
+                    receiver.reconfigure(
+                        timing
+                            .wait_ms
+                            .unwrap_or(connect_core::delivery::LOW_LATENCY_MERGE_WAIT_MS),
+                        policy.max_skew_ms(),
+                        count,
+                        requested,
+                    );
                 }
                 (_, true) => {
                     self.receiver = Some(Receiver::Scheduled(Merger::new(
@@ -287,7 +321,9 @@ impl Actor {
                 }
                 (_, false) => {
                     self.receiver = Some(Receiver::FirstCopy(FirstCopy::new(
-                        connect_core::delivery::LOW_LATENCY_MERGE_WAIT_MS,
+                        timing
+                            .wait_ms
+                            .unwrap_or(connect_core::delivery::LOW_LATENCY_MERGE_WAIT_MS),
                         policy.max_skew_ms(),
                         count,
                         requested,
@@ -769,6 +805,7 @@ mod tests {
             role: DeliveryRole::Origin,
             policy: None,
             paths: 1,
+            wait_ms: None,
         };
         let source = DesiredHop {
             id: "sender".into(),

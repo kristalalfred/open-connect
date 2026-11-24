@@ -44,6 +44,7 @@ pub fn origin(
         role: DeliveryRole::Origin,
         policy: None,
         paths: 1,
+        wait_ms: None,
     }))
 }
 

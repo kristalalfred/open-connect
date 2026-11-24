@@ -286,7 +286,7 @@ schedule. Changes that replace sockets or policies can interrupt media.
 
 ## Status and verification
 
-Southbound protocol version is 15. Native profiles advertise separate origin,
+Southbound protocol version is 16. Native profiles advertise separate origin,
 forward and receiver roles; the timed receiver advertises merge support and
 the `modes` it releases.
 Strom rejects timed desired hops; browser profiles advertise none. Rebuild

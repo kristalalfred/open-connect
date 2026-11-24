@@ -2195,7 +2195,7 @@ impl ResolvedEnd<'_> {
 }
 
 enum LinkChoice {
-    Listened(Listened),
+    Listened(Box<Listened>),
     Webrtc,
 }
 
@@ -2224,7 +2224,7 @@ impl Listened {
                 .rist
                 .clone()
                 .map(|listener| PortListener::Rist(listener, at)),
-            Transport::Whip | Transport::Whep => None,
+            Transport::Whip | Transport::Whep | Transport::Rtp => None,
         }
     }
 }
@@ -2247,7 +2247,7 @@ fn link_transport(
     let mut complementary = false;
     for transport in TRANSPORT_PREFERENCE {
         let listeners: &[Listener] = match transport {
-            Transport::Srt => &[Listener::Downstream, Listener::Upstream],
+            Transport::Srt | Transport::Rtp => &[Listener::Downstream, Listener::Upstream],
             Transport::Whip | Transport::Rist => &[Listener::Downstream],
             Transport::Whep => &[Listener::Upstream],
         };
@@ -2275,12 +2275,12 @@ fn link_transport(
                     continue;
                 }
                 if let Some(dialer_attachments) = dialer.dialing_attachments(&attachment.network) {
-                    return Ok(LinkChoice::Listened(Listened {
+                    return Ok(LinkChoice::Listened(Box::new(Listened {
                         transport,
                         listener,
                         attachment: attachment.clone(),
                         dialer_attachments,
-                    }));
+                    })));
                 }
             }
         }
@@ -2314,7 +2314,7 @@ fn listened_link(
     nodes: &[NodeDescriptor],
 ) -> Option<Listened> {
     match station_link(upstream, downstream, nodes) {
-        Ok(LinkChoice::Listened(link)) => Some(link),
+        Ok(LinkChoice::Listened(link)) => Some(*link),
         Ok(LinkChoice::Webrtc) | Err(_) => None,
     }
 }
@@ -2325,6 +2325,7 @@ fn has_listener(attachment: &NetworkAttachment, transport: Transport) -> bool {
         Transport::Whip => attachment.listeners.whip.is_some(),
         Transport::Whep => attachment.listeners.whep.is_some(),
         Transport::Rist => attachment.listeners.rist.is_some(),
+        Transport::Rtp => attachment.listeners.rtp.is_some(),
     }
 }
 
@@ -2341,7 +2342,7 @@ fn plan_link(
     let choice = match link_transport(&up, &down).map_err(|failure| {
         failure.into_error(&upstream.station.node_id, &downstream.station.node_id)
     })? {
-        LinkChoice::Listened(choice) => choice,
+        LinkChoice::Listened(choice) => *choice,
         LinkChoice::Webrtc => {
             let link = PeerLinkId::new(downstream.hop_id);
             let socket = SocketSpec::Webrtc(keys.peer_socket(PeerAttempt {
@@ -2967,6 +2968,7 @@ mod contract_tests {
                 }),
                 whip: None,
                 whep: None,
+                rtp: None,
                 rist: None,
             },
         }
@@ -3626,6 +3628,7 @@ mod contract_tests {
             }),
             whip: None,
             whep: None,
+            rtp: None,
             rist: Some(rist.clone()),
         };
         let wan = studio.topology.attachments[0].clone();
@@ -3725,6 +3728,7 @@ mod tests {
             }),
             whip: None,
             whep: None,
+            rtp: None,
             rist: None,
         }
     }

@@ -665,7 +665,7 @@ impl SocketReading {
                 .map(|stats| Self::sessions(stats.ingress(), |b| b.received))
                 .unwrap_or_default(),
             SocketSpec::Rist(_) => Self::srt_egresses(srt),
-            SocketSpec::Webrtc(_) | SocketSpec::Local(_) => Self::default(),
+            SocketSpec::Rtp(_) | SocketSpec::Webrtc(_) | SocketSpec::Local(_) => Self::default(),
         }
     }
 
@@ -681,7 +681,7 @@ impl SocketReading {
                 .map(|stats| Self::sessions(stats.egress_at(index), |b| b.sent))
                 .unwrap_or_default(),
             SocketSpec::Rist(_) => Self::srt_ingress(srt),
-            SocketSpec::Webrtc(_) | SocketSpec::Local(_) => Self::default(),
+            SocketSpec::Rtp(_) | SocketSpec::Webrtc(_) | SocketSpec::Local(_) => Self::default(),
         }
     }
 
@@ -738,7 +738,9 @@ impl SocketReading {
             SocketSpec::Rist(socket) => {
                 rist_condition(socket.role(), self.connected, advanced, stalled)
             }
-            SocketSpec::Webrtc(_) | SocketSpec::Local(_) => LinkCondition::Idle,
+            SocketSpec::Rtp(_) | SocketSpec::Webrtc(_) | SocketSpec::Local(_) => {
+                LinkCondition::Idle
+            }
         }
     }
 }

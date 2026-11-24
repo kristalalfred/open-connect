@@ -44,6 +44,7 @@ fn attachment(id: &str, network: &str, listener: Option<(&str, u16)>) -> Network
             }),
             whip: None,
             whep: None,
+            rtp: None,
             rist: None,
         },
     }

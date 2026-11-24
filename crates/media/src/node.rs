@@ -8,9 +8,9 @@ use axum::{Json, Router, routing::get};
 use connect_core::auth::Token;
 use connect_core::{
     DeliveryCapability, DeliveryMode, DeliveryRole, DesiredHop, FormatConstraint, HopEndpointClass,
-    HopProfile, HopStatus, LocalEnd, MediaBehavior, NodeCapabilities, NodeConfig, NodeDescriptor,
-    NodeHeartbeat, NodeRegistration, NodeStatus, PROTOCOL_VERSION, RoleSet, Transport,
-    TransportClass,
+    HopProfile, HopStatus, LinkClass, LocalEnd, MediaBehavior, NodeCapabilities, NodeConfig,
+    NodeDescriptor, NodeHeartbeat, NodeRegistration, NodeStatus, PROTOCOL_VERSION, RoleSet,
+    Transport, TransportClass,
 };
 use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
@@ -65,11 +65,17 @@ impl MediaConfig {
 
 #[must_use]
 pub fn profiles(clock_domain: &str, epoch: u64, scheduling_error_bound_us: u32) -> Vec<HopProfile> {
-    let class = || {
-        HopEndpointClass::Transport(TransportClass {
-            transport: Transport::Srt,
-            roles: RoleSet::both(),
-        })
+    let link = |transport| TransportClass {
+        transport,
+        roles: RoleSet::both(),
+    };
+    let class = || HopEndpointClass::Transport(link(Transport::Srt));
+    let rtp = || HopEndpointClass::Transport(link(Transport::Rtp));
+    let either = || {
+        HopEndpointClass::AnyOf(vec![
+            LinkClass::Transport(link(Transport::Srt)),
+            LinkClass::Transport(link(Transport::Rtp)),
+        ])
     };
     let untimed = |id: &str, ingress, egress, max_egresses, merge| HopProfile {
         id: id.into(),
@@ -98,15 +104,47 @@ pub fn profiles(clock_domain: &str, epoch: u64, scheduling_error_bound_us: u32) 
             true,
         ),
     ];
-    for (id, role, merge) in [
-        ("srt-timed-origin", DeliveryRole::Origin, false),
-        ("srt-timed-forward", DeliveryRole::Forward, false),
-        ("srt-timed-receiver", DeliveryRole::Receiver, true),
+    for (id, role, merge, ingress, egress) in [
+        (
+            "srt-timed-origin",
+            DeliveryRole::Origin,
+            false,
+            class(),
+            either(),
+        ),
+        (
+            "srt-timed-forward",
+            DeliveryRole::Forward,
+            false,
+            class(),
+            either(),
+        ),
+        (
+            "rtp-timed-forward",
+            DeliveryRole::Forward,
+            false,
+            rtp(),
+            either(),
+        ),
+        (
+            "srt-timed-receiver",
+            DeliveryRole::Receiver,
+            true,
+            class(),
+            class(),
+        ),
+        (
+            "rtp-timed-receiver",
+            DeliveryRole::Receiver,
+            true,
+            rtp(),
+            class(),
+        ),
     ] {
         profiles.push(HopProfile {
             id: id.into(),
-            ingress: class(),
-            egress: class(),
+            ingress,
+            egress,
             max_egresses: (role == DeliveryRole::Receiver).then_some(1),
             media_behavior: MediaBehavior::Preserve,
             merge,

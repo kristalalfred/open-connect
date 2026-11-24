@@ -209,6 +209,8 @@ pub struct TimedHop {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<DeliveryPolicy>,
     pub paths: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

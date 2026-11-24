@@ -694,6 +694,7 @@
                     "whip",
                     "whep",
                     "rist",
+                    "rtp",
                     "webrtc",
                     "input",
                     "output"
@@ -789,6 +790,38 @@
                     }
                   },
                   "additionalProperties": false
+                },
+                "fec": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "originals": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 1,
+                      "maximum": 64
+                    },
+                    "recovery": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "window_ms": {
+                      "type": "integer",
+                      "format": "uint16",
+                      "minimum": 1,
+                      "maximum": 1000
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "originals",
+                    "recovery",
+                    "window_ms"
+                  ]
                 },
                 "link": {
                   "type": [
@@ -858,6 +891,7 @@
                     "whip",
                     "whep",
                     "rist",
+                    "rtp",
                     "webrtc",
                     "input",
                     "output"
@@ -953,6 +987,38 @@
                     }
                   },
                   "additionalProperties": false
+                },
+                "fec": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "originals": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 1,
+                      "maximum": 64
+                    },
+                    "recovery": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "window_ms": {
+                      "type": "integer",
+                      "format": "uint16",
+                      "minimum": 1,
+                      "maximum": 1000
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "originals",
+                    "recovery",
+                    "window_ms"
+                  ]
                 },
                 "link": {
                   "type": [
@@ -1024,6 +1090,7 @@
                       "whip",
                       "whep",
                       "rist",
+                      "rtp",
                       "webrtc",
                       "input",
                       "output"
@@ -1119,6 +1186,38 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "fec": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "originals": {
+                        "type": "integer",
+                        "format": "uint8",
+                        "minimum": 1,
+                        "maximum": 64
+                      },
+                      "recovery": {
+                        "type": "integer",
+                        "format": "uint8",
+                        "minimum": 0,
+                        "maximum": 16
+                      },
+                      "window_ms": {
+                        "type": "integer",
+                        "format": "uint16",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "originals",
+                      "recovery",
+                      "window_ms"
+                    ]
                   },
                   "link": {
                     "type": [
@@ -1355,6 +1454,14 @@
                   "format": "uint8",
                   "minimum": 0,
                   "maximum": 255
+                },
+                "wait_ms": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint32",
+                  "minimum": 0
                 }
               },
               "additionalProperties": false,
@@ -1743,6 +1850,11 @@
                           "type": "integer",
                           "format": "int64",
                           "default": 0
+                        },
+                        "packets_recovered": {
+                          "type": "integer",
+                          "format": "int64",
+                          "default": 0
                         }
                       },
                       "additionalProperties": false
@@ -1849,6 +1961,11 @@
                           "default": 0
                         },
                         "packets_received_retransmitted": {
+                          "type": "integer",
+                          "format": "int64",
+                          "default": 0
+                        },
+                        "packets_recovered": {
                           "type": "integer",
                           "format": "int64",
                           "default": 0
@@ -1960,6 +2077,11 @@
                             "default": 0
                           },
                           "packets_received_retransmitted": {
+                            "type": "integer",
+                            "format": "int64",
+                            "default": 0
+                          },
+                          "packets_recovered": {
                             "type": "integer",
                             "format": "int64",
                             "default": 0
@@ -2348,7 +2470,8 @@
                                       "srt",
                                       "whip",
                                       "whep",
-                                      "rist"
+                                      "rist",
+                                      "rtp"
                                     ]
                                   },
                                   "roles": {
@@ -2404,7 +2527,8 @@
                                             "srt",
                                             "whip",
                                             "whep",
-                                            "rist"
+                                            "rist",
+                                            "rtp"
                                           ]
                                         },
                                         "roles": {
@@ -2456,7 +2580,8 @@
                                       "srt",
                                       "whip",
                                       "whep",
-                                      "rist"
+                                      "rist",
+                                      "rtp"
                                     ]
                                   },
                                   "roles": {
@@ -2512,7 +2637,8 @@
                                             "srt",
                                             "whip",
                                             "whep",
-                                            "rist"
+                                            "rist",
+                                            "rtp"
                                           ]
                                         },
                                         "roles": {
@@ -2882,6 +3008,44 @@
                                   "host",
                                   "port_range"
                                 ]
+                              },
+                              "rtp": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "host": {
+                                    "type": "string"
+                                  },
+                                  "port_range": {
+                                    "type": "object",
+                                    "properties": {
+                                      "start": {
+                                        "type": "integer",
+                                        "format": "uint16",
+                                        "minimum": 0,
+                                        "maximum": 65535
+                                      },
+                                      "end": {
+                                        "type": "integer",
+                                        "format": "uint16",
+                                        "minimum": 0,
+                                        "maximum": 65535
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "start",
+                                      "end"
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "required": [
+                                  "host",
+                                  "port_range"
+                                ]
                               }
                             },
                             "additionalProperties": false,
@@ -3189,7 +3353,8 @@
                                     "srt",
                                     "whip",
                                     "whep",
-                                    "rist"
+                                    "rist",
+                                    "rtp"
                                   ]
                                 },
                                 "roles": {
@@ -3245,7 +3410,8 @@
                                           "srt",
                                           "whip",
                                           "whep",
-                                          "rist"
+                                          "rist",
+                                          "rtp"
                                         ]
                                       },
                                       "roles": {
@@ -3297,7 +3463,8 @@
                                     "srt",
                                     "whip",
                                     "whep",
-                                    "rist"
+                                    "rist",
+                                    "rtp"
                                   ]
                                 },
                                 "roles": {
@@ -3353,7 +3520,8 @@
                                           "srt",
                                           "whip",
                                           "whep",
-                                          "rist"
+                                          "rist",
+                                          "rtp"
                                         ]
                                       },
                                       "roles": {
@@ -3778,6 +3946,44 @@
                                 "host",
                                 "port_range"
                               ]
+                            },
+                            "rtp": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "host": {
+                                  "type": "string"
+                                },
+                                "port_range": {
+                                  "type": "object",
+                                  "properties": {
+                                    "start": {
+                                      "type": "integer",
+                                      "format": "uint16",
+                                      "minimum": 0,
+                                      "maximum": 65535
+                                    },
+                                    "end": {
+                                      "type": "integer",
+                                      "format": "uint16",
+                                      "minimum": 0,
+                                      "maximum": 65535
+                                    }
+                                  },
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "start",
+                                    "end"
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false,
+                              "required": [
+                                "host",
+                                "port_range"
+                              ]
                             }
                           },
                           "additionalProperties": false,
@@ -4072,6 +4278,11 @@
                           "type": "integer",
                           "format": "int64",
                           "default": 0
+                        },
+                        "packets_recovered": {
+                          "type": "integer",
+                          "format": "int64",
+                          "default": 0
                         }
                       },
                       "additionalProperties": false
@@ -4178,6 +4389,11 @@
                           "default": 0
                         },
                         "packets_received_retransmitted": {
+                          "type": "integer",
+                          "format": "int64",
+                          "default": 0
+                        },
+                        "packets_recovered": {
                           "type": "integer",
                           "format": "int64",
                           "default": 0
@@ -4289,6 +4505,11 @@
                             "default": 0
                           },
                           "packets_received_retransmitted": {
+                            "type": "integer",
+                            "format": "int64",
+                            "default": 0
+                          },
+                          "packets_recovered": {
                             "type": "integer",
                             "format": "int64",
                             "default": 0
@@ -4674,7 +4895,8 @@
                                       "srt",
                                       "whip",
                                       "whep",
-                                      "rist"
+                                      "rist",
+                                      "rtp"
                                     ]
                                   },
                                   "roles": {
@@ -4730,7 +4952,8 @@
                                             "srt",
                                             "whip",
                                             "whep",
-                                            "rist"
+                                            "rist",
+                                            "rtp"
                                           ]
                                         },
                                         "roles": {
@@ -4782,7 +5005,8 @@
                                       "srt",
                                       "whip",
                                       "whep",
-                                      "rist"
+                                      "rist",
+                                      "rtp"
                                     ]
                                   },
                                   "roles": {
@@ -4838,7 +5062,8 @@
                                             "srt",
                                             "whip",
                                             "whep",
-                                            "rist"
+                                            "rist",
+                                            "rtp"
                                           ]
                                         },
                                         "roles": {
@@ -5208,6 +5433,44 @@
                                   "host",
                                   "port_range"
                                 ]
+                              },
+                              "rtp": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "host": {
+                                    "type": "string"
+                                  },
+                                  "port_range": {
+                                    "type": "object",
+                                    "properties": {
+                                      "start": {
+                                        "type": "integer",
+                                        "format": "uint16",
+                                        "minimum": 0,
+                                        "maximum": 65535
+                                      },
+                                      "end": {
+                                        "type": "integer",
+                                        "format": "uint16",
+                                        "minimum": 0,
+                                        "maximum": 65535
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "start",
+                                      "end"
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "required": [
+                                  "host",
+                                  "port_range"
+                                ]
                               }
                             },
                             "additionalProperties": false,
@@ -5452,6 +5715,11 @@
                           "type": "integer",
                           "format": "int64",
                           "default": 0
+                        },
+                        "packets_recovered": {
+                          "type": "integer",
+                          "format": "int64",
+                          "default": 0
                         }
                       },
                       "additionalProperties": false,
@@ -5461,7 +5729,8 @@
                         "packets_sent_lost",
                         "packets_retransmitted",
                         "packets_received_lost",
-                        "packets_received_retransmitted"
+                        "packets_received_retransmitted",
+                        "packets_recovered"
                       ]
                     },
                     "peer": {
@@ -5572,6 +5841,11 @@
                           "type": "integer",
                           "format": "int64",
                           "default": 0
+                        },
+                        "packets_recovered": {
+                          "type": "integer",
+                          "format": "int64",
+                          "default": 0
                         }
                       },
                       "additionalProperties": false,
@@ -5581,7 +5855,8 @@
                         "packets_sent_lost",
                         "packets_retransmitted",
                         "packets_received_lost",
-                        "packets_received_retransmitted"
+                        "packets_received_retransmitted",
+                        "packets_recovered"
                       ]
                     },
                     "peer": {
@@ -5694,6 +5969,11 @@
                             "type": "integer",
                             "format": "int64",
                             "default": 0
+                          },
+                          "packets_recovered": {
+                            "type": "integer",
+                            "format": "int64",
+                            "default": 0
                           }
                         },
                         "additionalProperties": false,
@@ -5703,7 +5983,8 @@
                           "packets_sent_lost",
                           "packets_retransmitted",
                           "packets_received_lost",
-                          "packets_received_retransmitted"
+                          "packets_received_retransmitted",
+                          "packets_recovered"
                         ]
                       },
                       "peer": {

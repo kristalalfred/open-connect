@@ -59,7 +59,7 @@ pub const ROUTE_STREAM_SET: &str = "/stream-sets/{owner}";
 pub const ROUTE_STREAM_SETS: &str = "/stream-sets";
 pub const ROUTE_STREAMS: &str = "/streams";
 
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 
 #[must_use]
 pub fn protocol_compatible(version: u32) -> bool {
@@ -737,6 +737,8 @@ pub enum SocketSpec {
 
     Rist(RistSocket),
 
+    Rtp(RtpSocket),
+
     Webrtc(PeerSocket),
 
     Local(LocalSocket),
@@ -816,6 +818,7 @@ impl SocketSpec {
             Self::Srt(socket) => socket.role().name(),
             Self::Whip(socket) | Self::Whep(socket) => socket.role.name(),
             Self::Rist(socket) => socket.role().name(),
+            Self::Rtp(socket) => socket.role().name(),
             Self::Webrtc(_) => "link",
             Self::Local(socket) => socket.end.name(),
         }
@@ -829,6 +832,7 @@ impl std::fmt::Display for SocketSpec {
             Self::Whip(_) => f.write_str(Transport::Whip.name()),
             Self::Whep(_) => f.write_str(Transport::Whep.name()),
             Self::Rist(_) => f.write_str(Transport::Rist.name()),
+            Self::Rtp(_) => f.write_str(Transport::Rtp.name()),
             Self::Webrtc(_) => f.write_str(WEBRTC_TRANSPORT),
             Self::Local(socket) => write!(f, "{} {}", socket.end, socket.id),
         }
@@ -902,6 +906,105 @@ impl RistSocket {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RtpSocket {
+    Listen {
+        port: u16,
+        params: RtpParams,
+    },
+    Connect {
+        host: String,
+        port: u16,
+        params: RtpParams,
+    },
+}
+
+impl RtpSocket {
+    #[must_use]
+    pub fn role(&self) -> SocketRole {
+        match self {
+            Self::Listen { .. } => SocketRole::Listen,
+            Self::Connect { .. } => SocketRole::Connect,
+        }
+    }
+
+    #[must_use]
+    pub fn port(&self) -> u16 {
+        match self {
+            Self::Listen { port, .. } | Self::Connect { port, .. } => *port,
+        }
+    }
+
+    #[must_use]
+    pub fn params(&self) -> &RtpParams {
+        match self {
+            Self::Listen { params, .. } | Self::Connect { params, .. } => params,
+        }
+    }
+
+    pub fn params_mut(&mut self) -> &mut RtpParams {
+        match self {
+            Self::Listen { params, .. } | Self::Connect { params, .. } => params,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RtpParams {
+    pub payload: PayloadKind,
+    pub passphrase: Option<Passphrase>,
+    pub fec: FecParams,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FecParams {
+    #[schemars(range(min = 1, max = 64))]
+    pub originals: u8,
+    #[schemars(range(max = 16))]
+    pub recovery: u8,
+    #[schemars(range(min = 1, max = 1000))]
+    pub window_ms: u16,
+}
+
+impl FecParams {
+    pub const MAX_ORIGINALS: u8 = 64;
+    pub const MAX_RECOVERY: u8 = 16;
+    pub const MAX_WINDOW_MS: u16 = 1000;
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.originals == 0 || self.originals > Self::MAX_ORIGINALS {
+            return Err(format!(
+                "fec originals must be 1 to {}",
+                Self::MAX_ORIGINALS
+            ));
+        }
+        if self.recovery > Self::MAX_RECOVERY {
+            return Err(format!(
+                "fec recovery must be at most {}",
+                Self::MAX_RECOVERY
+            ));
+        }
+        if self.window_ms == 0 || self.window_ms > Self::MAX_WINDOW_MS {
+            return Err(format!(
+                "fec window_ms must be 1 to {}",
+                Self::MAX_WINDOW_MS
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for FecParams {
+    fn default() -> Self {
+        Self {
+            originals: 10,
+            recovery: 2,
+            window_ms: 20,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignallingSocket {
     pub role: SocketRole,
     pub url: String,
@@ -947,6 +1050,8 @@ struct SocketRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     params: Option<SrtParams>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    fec: Option<FecParams>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     link: Option<PeerLinkId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     generation: Option<u32>,
@@ -963,6 +1068,7 @@ enum SocketTransport {
     Whip,
     Whep,
     Rist,
+    Rtp,
     Webrtc,
     Input,
     Output,
@@ -993,6 +1099,7 @@ impl From<&SocketSpec> for SocketRepr {
             url: None,
             endpoint_id: None,
             params: None,
+            fec: None,
             link: None,
             generation: None,
             stun: None,
@@ -1029,6 +1136,24 @@ impl From<&SocketSpec> for SocketRepr {
                 port: Some(*port),
                 ..bare(SocketTransport::Rist, Some(SocketRole::Connect))
             },
+            SocketSpec::Rtp(socket) => {
+                let params = socket.params();
+                let (role, host) = match socket {
+                    RtpSocket::Listen { .. } => (SocketRole::Listen, None),
+                    RtpSocket::Connect { host, .. } => (SocketRole::Connect, Some(host.clone())),
+                };
+                Self {
+                    host,
+                    port: Some(socket.port()),
+                    params: Some(SrtParams {
+                        payload: params.payload,
+                        passphrase: params.passphrase.clone(),
+                        ..SrtParams::default()
+                    }),
+                    fec: Some(params.fec),
+                    ..bare(SocketTransport::Rtp, Some(role))
+                }
+            }
             SocketSpec::Webrtc(socket) => Self {
                 link: Some(socket.attempt.link.clone()),
                 generation: Some(socket.attempt.generation),
@@ -1063,6 +1188,7 @@ impl TryFrom<SocketRepr> for SocketSpec {
             url,
             endpoint_id,
             params,
+            fec,
             link,
             generation,
             stun,
@@ -1075,7 +1201,53 @@ impl TryFrom<SocketRepr> for SocketSpec {
             ("turn", turn.is_some()),
         ];
 
+        if !matches!(transport, SocketTransport::Rtp) && fec.is_some() {
+            return Err("only an rtp socket carries fec".to_string());
+        }
         match transport {
+            SocketTransport::Rtp => {
+                reject_extra_fields(
+                    "rtp",
+                    [
+                        ("id", id.is_some()),
+                        ("url", url.is_some()),
+                        ("endpoint_id", endpoint_id.is_some()),
+                    ],
+                )?;
+                reject_extra_fields("rtp", webrtc_fields)?;
+                let port = port.ok_or_else(|| "an rtp socket needs a port".to_string())?;
+                let SrtParams {
+                    payload,
+                    latency,
+                    passphrase,
+                    pbkeylen,
+                } = params.unwrap_or_default();
+                reject_extra_fields(
+                    "rtp",
+                    [
+                        ("latency", latency.is_some()),
+                        ("pbkeylen", pbkeylen.is_some()),
+                    ],
+                )?;
+                let fec = fec.ok_or_else(|| "an rtp socket needs fec".to_string())?;
+                fec.validate()?;
+                let params = RtpParams {
+                    payload,
+                    passphrase,
+                    fec,
+                };
+                match link_role("rtp", role)? {
+                    SocketRole::Listen => {
+                        reject_extra_fields("listening rtp", [("host", host.is_some())])?;
+                        Ok(Self::Rtp(RtpSocket::Listen { port, params }))
+                    }
+                    SocketRole::Connect => {
+                        let host =
+                            host.ok_or_else(|| "a calling rtp socket needs a host".to_string())?;
+                        Ok(Self::Rtp(RtpSocket::Connect { host, port, params }))
+                    }
+                }
+            }
             SocketTransport::Srt => {
                 reject_extra_fields(
                     "srt",
@@ -1247,6 +1419,8 @@ pub enum Transport {
     Whep,
 
     Rist,
+
+    Rtp,
 }
 
 impl Transport {
@@ -1257,13 +1431,14 @@ impl Transport {
             Self::Whip => "whip",
             Self::Whep => "whep",
             Self::Rist => "rist",
+            Self::Rtp => "rtp",
         }
     }
 
     #[must_use]
     pub fn signalling(self) -> Option<SignallingTransport> {
         match self {
-            Self::Srt | Self::Rist => None,
+            Self::Srt | Self::Rist | Self::Rtp => None,
             Self::Whip => Some(SignallingTransport::Whip),
             Self::Whep => Some(SignallingTransport::Whep),
         }
@@ -1574,6 +1749,8 @@ pub struct LinkStats {
     pub packets_received_lost: i64,
     #[serde(default)]
     pub packets_received_retransmitted: i64,
+    #[serde(default)]
+    pub packets_recovered: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1807,6 +1984,7 @@ impl TransportClass {
             SocketSpec::Whip(socket) => (Transport::Whip, socket.role),
             SocketSpec::Whep(socket) => (Transport::Whep, socket.role),
             SocketSpec::Rist(socket) => (Transport::Rist, socket.role()),
+            SocketSpec::Rtp(socket) => (Transport::Rtp, socket.role()),
             SocketSpec::Webrtc(_) | SocketSpec::Local(_) => return false,
         };
         self.offers(transport, role)
@@ -2079,12 +2257,19 @@ pub struct NetworkListeners {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rist: Option<RistListener>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtp: Option<RtpListener>,
 }
 
 impl NetworkListeners {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.srt.is_none() && self.whip.is_none() && self.whep.is_none() && self.rist.is_none()
+        self.srt.is_none()
+            && self.whip.is_none()
+            && self.whep.is_none()
+            && self.rist.is_none()
+            && self.rtp.is_none()
     }
 
     #[must_use]
@@ -2106,6 +2291,13 @@ pub struct SrtListener {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RistListener {
+    pub host: String,
+    pub port_range: PortRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RtpListener {
     pub host: String,
     pub port_range: PortRange,
 }
@@ -2211,6 +2403,13 @@ impl NodeConfig {
                     attachment
                         .listeners
                         .rist
+                        .iter()
+                        .map(|listener| (&listener.host, listener.port_range)),
+                )
+                .chain(
+                    attachment
+                        .listeners
+                        .rtp
                         .iter()
                         .map(|listener| (&listener.host, listener.port_range)),
                 );
@@ -3001,6 +3200,7 @@ mod tests {
                         }),
                         whip: None,
                         whep: None,
+                        rtp: None,
                         rist: None,
                     },
                 }],

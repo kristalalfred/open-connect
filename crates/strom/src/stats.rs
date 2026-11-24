@@ -77,6 +77,7 @@ impl From<&ElementStats> for connect_core::LinkStats {
             packets_retransmitted: stats.packets_retransmitted,
             packets_received_lost: stats.packets_received_lost,
             packets_received_retransmitted: stats.packets_received_retransmitted,
+            packets_recovered: 0,
         }
     }
 }

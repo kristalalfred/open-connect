@@ -597,6 +597,7 @@
                       "whip",
                       "whep",
                       "rist",
+                      "rtp",
                       "webrtc",
                       "input",
                       "output"
@@ -710,6 +711,37 @@
                     ]
                   }
                 }
+              },
+              "fec": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "originals": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 1,
+                    "maximum": 64
+                  },
+                  "recovery": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0,
+                    "maximum": 16
+                  },
+                  "window_ms": {
+                    "type": "integer",
+                    "format": "uint16",
+                    "minimum": 1,
+                    "maximum": 1000
+                  }
+                },
+                "required": [
+                  "originals",
+                  "recovery",
+                  "window_ms"
+                ]
               },
               "link": {
                 "type": [
@@ -779,6 +811,7 @@
                       "whip",
                       "whep",
                       "rist",
+                      "rtp",
                       "webrtc",
                       "input",
                       "output"
@@ -892,6 +925,37 @@
                     ]
                   }
                 }
+              },
+              "fec": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "originals": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 1,
+                    "maximum": 64
+                  },
+                  "recovery": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0,
+                    "maximum": 16
+                  },
+                  "window_ms": {
+                    "type": "integer",
+                    "format": "uint16",
+                    "minimum": 1,
+                    "maximum": 1000
+                  }
+                },
+                "required": [
+                  "originals",
+                  "recovery",
+                  "window_ms"
+                ]
               },
               "link": {
                 "type": [
@@ -963,6 +1027,7 @@
                         "whip",
                         "whep",
                         "rist",
+                        "rtp",
                         "webrtc",
                         "input",
                         "output"
@@ -1076,6 +1141,37 @@
                       ]
                     }
                   }
+                },
+                "fec": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "originals": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 1,
+                      "maximum": 64
+                    },
+                    "recovery": {
+                      "type": "integer",
+                      "format": "uint8",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "window_ms": {
+                      "type": "integer",
+                      "format": "uint16",
+                      "minimum": 1,
+                      "maximum": 1000
+                    }
+                  },
+                  "required": [
+                    "originals",
+                    "recovery",
+                    "window_ms"
+                  ]
                 },
                 "link": {
                   "type": [
@@ -1345,6 +1441,14 @@
                 "format": "uint8",
                 "minimum": 0,
                 "maximum": 255
+              },
+              "wait_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "uint32",
+                "minimum": 0
               }
             },
             "required": [

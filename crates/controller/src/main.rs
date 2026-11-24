@@ -433,7 +433,7 @@ struct SocketView {
 
 impl From<&connect_core::SocketSpec> for SocketView {
     fn from(spec: &connect_core::SocketSpec) -> Self {
-        use connect_core::{RistSocket, SocketSpec, SrtSocket, Transport};
+        use connect_core::{RistSocket, RtpSocket, SocketSpec, SrtSocket, Transport};
 
         let bare = |transport, mode| Self {
             transport,
@@ -467,6 +467,14 @@ impl From<&connect_core::SocketSpec> for SocketView {
                 },
                 port: Some(socket.port()),
                 ..bare(Transport::Rist.name(), Some(socket.role().name()))
+            },
+            SocketSpec::Rtp(socket) => Self {
+                host: match socket {
+                    RtpSocket::Connect { host, .. } => Some(host.clone()),
+                    RtpSocket::Listen { .. } => None,
+                },
+                port: Some(socket.port()),
+                ..bare(Transport::Rtp.name(), Some(socket.role().name()))
             },
             SocketSpec::Webrtc(socket) => Self {
                 id: Some(socket.attempt.link.to_string()),
@@ -1892,6 +1900,7 @@ fn withhold_secrets(hops: &mut [DesiredHop]) {
     for socket in hops.iter_mut().flat_map(DesiredHop::sockets_mut) {
         match socket {
             connect_core::SocketSpec::Srt(socket) => socket.params_mut().passphrase = None,
+            connect_core::SocketSpec::Rtp(socket) => socket.params_mut().passphrase = None,
             connect_core::SocketSpec::Webrtc(socket) => socket.turn.clear(),
             _ => {}
         }
@@ -3073,6 +3082,7 @@ mod tests {
                             }),
                             whip: None,
                             whep: None,
+                            rtp: None,
                             rist: None,
                         },
                     }],
@@ -8256,6 +8266,7 @@ mod key_exposure_tests {
                 }),
                 whip: None,
                 whep: None,
+                rtp: None,
                 rist: None,
             },
         }

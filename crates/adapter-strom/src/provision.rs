@@ -288,6 +288,7 @@ fn hop_endpoint_ids(hop: &DesiredHop) -> Vec<String> {
             SocketSpec::Whip(socket) | SocketSpec::Whep(socket) => Some(socket.endpoint_id.clone()),
             SocketSpec::Srt(_)
             | SocketSpec::Rist(_)
+            | SocketSpec::Rtp(_)
             | SocketSpec::Webrtc(_)
             | SocketSpec::Local(_) => None,
         })
@@ -370,6 +371,7 @@ pub fn resolved_addr(spec: &SocketSpec, listener_host: Option<&str>) -> Option<R
         }
         SocketSpec::Whip(_)
         | SocketSpec::Whep(_)
+        | SocketSpec::Rtp(_)
         | SocketSpec::Webrtc(_)
         | SocketSpec::Local(_) => {
             return None;
