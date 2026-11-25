@@ -13,7 +13,7 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 
 use crate::clock::Clock;
@@ -198,6 +198,7 @@ struct Shared {
     ssrc: u32,
     started: Instant,
     state: Mutex<State>,
+    group_opened: Notify,
 }
 
 impl Shared {
@@ -352,6 +353,7 @@ impl RtpLink {
             keys: Keys::new(params.passphrase.as_ref(), spec.role()),
             ssrc: random_ssrc(),
             started: Instant::now(),
+            group_opened: Notify::new(),
             state: Mutex::new(State {
                 socket: None,
                 target: None,
@@ -390,8 +392,12 @@ impl RtpLink {
         self.shared.send(&mut state, DATA, bytes)?;
         state.bytes = state.bytes.saturating_add(bytes.len() as u64);
         state.last_progress_ns = Some(now_ns);
+        let idle = state.encoder.due().is_none();
         for parity in state.encoder.push(sequence, bytes, Instant::now()) {
             let _ = self.shared.send(&mut state, PARITY, &parity_body(&parity));
+        }
+        if idle && state.encoder.due().is_some() {
+            self.shared.group_opened.notify_one();
         }
         Ok(())
     }
@@ -523,6 +529,7 @@ async fn run(spec: RtpSocket, bind_ip: IpAddr, shared: Arc<Shared>, receiving: O
                     receive(&shared, &buffer[..length], from, role, receiving.as_ref());
                 }
             }
+            () = shared.group_opened.notified() => {}
             _ = keepalive.tick() => {
                 let mut state = shared.state.lock().unwrap();
                 let _ = shared.send(&mut state, KEEPALIVE, &[]);
@@ -770,6 +777,36 @@ mod tests {
                 .enumerate()
                 .all(|(n, bytes)| bytes == &vec![n as u8; 100])
         );
+    }
+
+    #[tokio::test]
+    async fn a_group_opened_while_the_link_is_idle_sends_its_parity_when_its_window_closes() {
+        let peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let keys = Keys::new(Some(&phrase()), SocketRole::Listen);
+        let output = RtpLink::output(
+            RtpSocket::Connect {
+                host: "127.0.0.1".into(),
+                port: peer.local_addr().unwrap().port(),
+                params: params(),
+            },
+            "127.0.0.1".parse().unwrap(),
+        );
+        let mut warm = Encoder::new(params().fec);
+        warm.push(0, b"record", Instant::now());
+        assert!(!warm.flush().is_empty());
+        let mut buffer = vec![0_u8; MAX_DATAGRAM];
+        let mut next = async || {
+            let (length, _) = peer.recv_from(&mut buffer).await.unwrap();
+            open(keys.receive.as_ref(), &buffer[..length]).unwrap().kind
+        };
+        while next().await != KEEPALIVE {}
+        let sent = Instant::now();
+        output.try_send(&Bytes::from_static(b"record"), 1).unwrap();
+        assert_eq!(next().await, DATA);
+        let window = Duration::from_millis(u64::from(params().fec.window_ms));
+        let parity = tokio::time::timeout(window * 3, async { while next().await != PARITY {} });
+        assert!(parity.await.is_ok());
+        assert!(sent.elapsed() >= window);
     }
 
     #[test]
