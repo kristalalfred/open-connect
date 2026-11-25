@@ -151,20 +151,28 @@ again with a new ETag. An old `If-Match` cannot match the new stream.
 ### Conditions
 
 A stream status carries `generation`, and `observed_generation`: the generation
-the last completed reconcile used, or `null` before one completes. It always
-carries five conditions:
+the last completed reconcile used, or `null` before one completes. It carries
+these conditions:
 
 | Type | Says |
 |---|---|
 | `placement_ready` | The stream has a plan. |
 | `nodes_available` | Every node it names is registered and online. |
 | `hops_ready` | Every desired hop is provisioned. |
-| `format_compatible` | The source, every selected hop and every destination establish unchanged, acceptable media by declaration. |
+| `format_compatible` | The source, every selected hop and every destination establish unchanged, acceptable media by declaration. Present only when [formats are checked](#format-checks). |
 | `media_flowing` | Media reaches every destination. |
 
 Each condition has a `status` of `true`, `false` or `unknown`, a stable `reason`
 code, a `detail` string and an RFC 3339 `last_transition_time`. The time
 changes only when the status changes.
+
+### Format checks
+
+A reconciled stream carries `format_compatible` under `strict` policy, or when
+its source declares a `format`, or when a destination or a selected hop profile
+declares an `accepts` with at least one constraint. Otherwise nothing states a
+format or a requirement, and the condition is absent from the stream and its
+destinations. `accepts: {}` imposes no constraint and does not count.
 
 Format reasons are `format_compatible` (`true`), `format_mismatch` (`false`), or
 `source_format_unknown`, `destination_accepts_unknown`, `hop_accepts_unknown`,

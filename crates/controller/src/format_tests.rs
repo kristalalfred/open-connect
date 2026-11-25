@@ -134,6 +134,50 @@ fn unknown_behavior_erases_output_but_missing_accepts_does_not() {
 }
 
 #[test]
+fn report_streams_omit_format_until_a_route_declares_a_requirement() {
+    let mut observed = observed_nodes();
+    let mut strict = stream("feed");
+    strict.format_policy = FormatPolicy::Strict;
+    let mut stream = stream("feed");
+    let reports_format = |stream: &StreamDefinition, observed: &ObservedState| {
+        let outcome = run(stream.clone(), observed);
+        let status = &outcome.streams[0];
+        status
+            .conditions
+            .iter()
+            .chain(status.destinations.iter().flat_map(|d| &d.conditions))
+            .find(|condition| condition.condition_type == StreamConditionType::FormatCompatible)
+            .map(|condition| condition.reason)
+    };
+    assert_eq!(reports_format(&stream, &observed), None);
+    destination(&mut stream).accepts = Some(FormatConstraint::default());
+    assert_eq!(reports_format(&stream, &observed), None);
+    stream.enabled = false;
+    assert_eq!(reports_format(&stream, &observed), None);
+    stream.enabled = true;
+
+    let mpeg_ts = FormatConstraint {
+        container: Some(vec![Container::MpegTs]),
+        ..Default::default()
+    };
+    destination(&mut stream).accepts = Some(mpeg_ts.clone());
+    assert_eq!(
+        reports_format(&stream, &observed),
+        Some(StreamConditionReason::SourceFormatUnknown)
+    );
+    destination(&mut stream).accepts = None;
+    observed.nodes[0].capabilities.hop_profiles[0].accepts = Some(mpeg_ts);
+    assert_eq!(
+        reports_format(&stream, &observed),
+        Some(StreamConditionReason::SourceFormatUnknown)
+    );
+
+    let blocked = run(strict, &observed_nodes());
+    assert_eq!(blocked.streams[0].status, PathStatus::Pending);
+    assert_eq!(format(&blocked).reason, StreamConditionReason::SourceFormatUnknown);
+}
+
+#[test]
 fn strict_selects_eligible_profiles_and_relays_before_reserving_ports() {
     let mut observed = observed_nodes();
     for node in &mut observed.nodes {

@@ -1,28 +1,59 @@
 use connect_core::{
-    FormatConstraint, HopRole, MediaBehavior, MediaFormat, NodeDescriptor, Path, StreamCondition,
-    StreamConditionReason as Reason, StreamConditionStatus as Status, StreamConditionType,
-    StreamDefinition,
+    FormatConstraint, FormatPolicy, HopRole, MediaBehavior, MediaFormat, NodeDescriptor, Path,
+    StreamCondition, StreamConditionReason as Reason, StreamConditionStatus as Status,
+    StreamConditionType, StreamDefinition,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Compatibility {
-    pub destinations: Vec<(String, StreamCondition)>,
+    pub destinations: Vec<Verdict>,
+    strict: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Verdict {
+    pub id: String,
+    pub condition: StreamCondition,
+    pub declared: bool,
 }
 
 impl Compatibility {
     pub fn aggregate(&self) -> StreamCondition {
-        aggregate(self.destinations.iter().map(|(_, condition)| condition))
+        aggregate(self.destinations.iter().map(|verdict| &verdict.condition))
     }
 
     pub fn for_stream(&self, stream: &StreamDefinition) -> StreamCondition {
-        aggregate(self.destinations.iter().filter_map(|(id, condition)| {
+        aggregate(self.within(stream).map(|verdict| &verdict.condition))
+    }
+
+    pub fn reported(&self) -> Option<StreamCondition> {
+        self.report(self.destinations.iter())
+    }
+
+    pub fn reported_for_stream(&self, stream: &StreamDefinition) -> Option<StreamCondition> {
+        self.report(self.within(stream))
+    }
+
+    fn within<'a>(&'a self, stream: &'a StreamDefinition) -> impl Iterator<Item = &'a Verdict> {
+        self.destinations.iter().filter(|verdict| {
             stream
                 .destinations
                 .iter()
-                .any(|destination| destination.id == *id)
-                .then_some(condition)
-        }))
+                .any(|destination| destination.id == verdict.id)
+        })
     }
+
+    fn report<'a>(&self, verdicts: impl Iterator<Item = &'a Verdict>) -> Option<StreamCondition> {
+        let mut verdicts = verdicts
+            .filter(|verdict| self.strict || verdict.declared)
+            .peekable();
+        verdicts.peek()?;
+        Some(aggregate(verdicts.map(|verdict| &verdict.condition)))
+    }
+}
+
+fn restricts(constraint: Option<&FormatConstraint>) -> bool {
+    constraint.is_some_and(|constraint| *constraint != FormatConstraint::default())
 }
 
 fn compatible() -> StreamCondition {
@@ -107,10 +138,13 @@ pub fn evaluate(
     let mut destinations: Vec<_> = stream.destinations.iter().collect();
     destinations.sort_by(|left, right| left.id.cmp(&right.id));
     Compatibility {
+        strict: stream.format_policy == FormatPolicy::Strict,
         destinations: destinations
             .into_iter()
             .map(|destination| {
                 let mut result = compatible();
+                let mut declared =
+                    stream.source.format().is_some() || restricts(destination.endpoint.accepts());
                 if stream.source.format().is_none() {
                     record(
                         &mut result,
@@ -132,7 +166,11 @@ pub fn evaluate(
                             destination.id
                         ),
                     );
-                    return (destination.id.clone(), result);
+                    return Verdict {
+                        id: destination.id.clone(),
+                        condition: result,
+                        declared,
+                    };
                 };
                 let secondary = format!("{}.2", destination.id);
                 let branches = std::iter::once(destination.id.as_str()).chain(
@@ -189,6 +227,7 @@ pub fn evaluate(
                             format = None;
                             continue;
                         };
+                        declared |= restricts(profile.accepts.as_ref());
                         compare(
                             &mut result,
                             format,
@@ -226,7 +265,11 @@ pub fn evaluate(
                         &format!("destination {} path {branch}", destination.id),
                     );
                 }
-                (destination.id.clone(), result)
+                Verdict {
+                    id: destination.id.clone(),
+                    condition: result,
+                    declared,
+                }
             })
             .collect(),
     }

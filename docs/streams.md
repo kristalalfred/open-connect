@@ -224,6 +224,10 @@ when switching from `report` to `strict`; there is no old-route fallback.
 Removal is asynchronous. A disconnected adapter can retain flows until it polls.
 Strict admission is not an immediate cutoff or a security boundary.
 
+Under `report`, a destination whose route declares no source `format` and no
+constraining `accepts` has no `format_compatible` condition. See
+[format checks](api.md#format-checks).
+
 Under `report`, known mismatches read `degraded` without preventing routing.
 Unknown compatibility does not independently degrade a stream, so `flowing` can
 coexist with unknown declarations. The controller does not inspect media or build

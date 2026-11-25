@@ -933,7 +933,6 @@ fn unreconciled_stream_status(stored: &StoredStream) -> StreamStatus {
         StreamConditionType::PlacementReady,
         StreamConditionType::NodesAvailable,
         StreamConditionType::HopsReady,
-        StreamConditionType::FormatCompatible,
         StreamConditionType::MediaFlowing,
     ]
     .into_iter()
@@ -2505,9 +2504,11 @@ fn disabled_conditions(stream: &StreamDefinition) -> Vec<StreamCondition> {
             StreamConditionReason::Disabled,
             "stream is disabled",
         ),
-        compatibility::evaluate(stream, None, &[]).aggregate(),
-        media_condition(PathStatus::Idle),
     ]
+    .into_iter()
+    .chain(compatibility::evaluate(stream, None, &[]).reported())
+    .chain([media_condition(PathStatus::Idle)])
+    .collect()
 }
 
 fn placement_failed_conditions(
@@ -2527,8 +2528,10 @@ fn placement_failed_conditions(
         )
     };
     let format = match error {
-        PlacementError::FormatBlocked { compatibility, .. } => compatibility.for_stream(stream),
-        _ => compatibility::evaluate(stream, None, &[]).aggregate(),
+        PlacementError::FormatBlocked { compatibility, .. } => {
+            compatibility.reported_for_stream(stream)
+        }
+        _ => compatibility::evaluate(stream, None, &[]).reported(),
     };
     let placement_reason = if let PlacementError::FormatBlocked { compatibility, .. } = error {
         compatibility.aggregate().reason
@@ -2565,9 +2568,11 @@ fn placement_failed_conditions(
             StreamConditionReason::NotReady,
             "no desired hops exist until placement succeeds",
         ),
-        format,
-        media_condition(PathStatus::Pending),
     ]
+    .into_iter()
+    .chain(format)
+    .chain([media_condition(PathStatus::Pending)])
+    .collect()
 }
 
 fn single_path_detail<'a>(shortfalls: impl IntoIterator<Item = &'a SinglePath>) -> Option<String> {
@@ -2589,7 +2594,7 @@ fn peer_route_detail<'a>(routes: impl IntoIterator<Item = &'a path::PeerRoute>) 
 }
 
 fn placed_conditions(
-    format: StreamCondition,
+    format: Option<StreamCondition>,
     path_status: PathStatus,
     offline_node: Option<&str>,
     single_path: Option<&str>,
@@ -2647,17 +2652,15 @@ fn placed_conditions(
             with_routes("the stream has a complete path"),
         ),
     };
-    vec![
-        placement,
-        nodes,
-        hops,
-        format,
-        media_condition(if offline_node.is_some() {
+    [placement, nodes, hops]
+        .into_iter()
+        .chain(format)
+        .chain([media_condition(if offline_node.is_some() {
             PathStatus::Degraded
         } else {
             path_status
-        }),
-    ]
+        })])
+        .collect()
 }
 
 fn destination_stream(stream: &StreamDefinition, id: &str) -> StreamDefinition {
@@ -2853,7 +2856,7 @@ fn reconcile_with_revisions(
                             )
                         });
                         let mut conditions = placed_conditions(
-                            compatibility.for_stream(&destination_stream),
+                            compatibility.reported_for_stream(&destination_stream),
                             branch_status,
                             offline_node.as_deref(),
                             single_path.as_deref(),
@@ -2901,7 +2904,7 @@ fn reconcile_with_revisions(
                     }
                 }
                 let mut conditions = placed_conditions(
-                    compatibility.aggregate(),
+                    compatibility.reported(),
                     path_status,
                     offline_node.as_deref(),
                     single_path_detail(&planned.single_path).as_deref(),
@@ -4487,7 +4490,7 @@ mod tests {
             let view = state.view.read().await;
             assert_eq!(view.streams[0].generation, 1);
             assert_eq!(view.streams[0].observed_generation, Some(1));
-            assert_eq!(view.streams[0].conditions.len(), 5);
+            assert_eq!(view.streams[0].conditions.len(), 4);
             for condition in &view.streams[0].conditions {
                 time::OffsetDateTime::parse(
                     &condition.last_transition_time,
