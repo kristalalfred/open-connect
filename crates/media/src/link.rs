@@ -389,9 +389,10 @@ impl RtpLink {
     pub fn try_send(&self, bytes: &Bytes, now_ns: u64) -> Result<(), DeliveryReason> {
         let mut state = self.shared.state.lock().unwrap();
         let sequence = state.counters[0];
-        self.shared.send(&mut state, DATA, bytes)?;
-        state.bytes = state.bytes.saturating_add(bytes.len() as u64);
-        state.last_progress_ns = Some(now_ns);
+        let sent = self.shared.send(&mut state, DATA, bytes);
+        if state.counters[0] == sequence {
+            return sent.map(|_| ());
+        }
         let idle = state.encoder.due().is_none();
         for parity in state.encoder.push(sequence, bytes, Instant::now()) {
             let _ = self.shared.send(&mut state, PARITY, &parity_body(&parity));
@@ -399,6 +400,9 @@ impl RtpLink {
         if idle && state.encoder.due().is_some() {
             self.shared.group_opened.notify_one();
         }
+        sent?;
+        state.bytes = state.bytes.saturating_add(bytes.len() as u64);
+        state.last_progress_ns = Some(now_ns);
         Ok(())
     }
 
