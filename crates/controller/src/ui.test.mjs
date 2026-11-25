@@ -21,7 +21,7 @@ class Element {
 }
 
 const html = await readFile(new URL("./ui.html", import.meta.url), "utf8");
-const script = html.match(/<script>([\s\S]*?)<\/script>/)[1].split("\nrenderLegend();")[0];
+const script = html.match(/<script>([\s\S]*?)<\/script>/)[1].split("\nboot();")[0];
 
 function render(stream) {
   const context = createContext({

@@ -12,6 +12,7 @@
     --faint: #9ca3af;
     --hairline: #e5e7eb;
     --chip: #f3f4f6;
+    --hover: #f9fafb;
     --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
     --green: #16a34a;
     --blue: #2563eb;
@@ -27,6 +28,7 @@
       --faint: #6b7280;
       --hairline: #23272c;
       --chip: #191d21;
+      --hover: #15181b;
       --green: #4ade80;
       --blue: #60a5fa;
       --amber: #fbbf24;
@@ -39,41 +41,91 @@
     margin: 0;
     background: var(--bg);
     color: var(--fg);
-    font: 14px/1.5 system-ui, -apple-system, sans-serif;
+    font: 13px/1.45 system-ui, -apple-system, sans-serif;
   }
-  main { max-width: 64rem; margin: 0 auto; padding: 1.5rem 2rem 4rem; }
+  main { max-width: 96rem; margin: 0 auto; padding: 1rem 1.5rem 4rem; }
+  button, input, select { font: inherit; color: inherit; }
+  button { background: none; border: 0; padding: 0; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 3px; }
+  .muted { color: var(--muted); }
+  .mono { font-family: var(--mono); font-size: 12px; }
 
   header {
     display: flex;
     align-items: baseline;
-    gap: 0.75rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--hairline);
+    flex-wrap: wrap;
+    gap: 0.25rem 0.75rem;
+    padding-bottom: 0.75rem;
   }
-  header h1 { font-size: 1rem; font-weight: 600; margin: 0; }
-  header .summary { color: var(--muted); }
-  header .poll { margin-left: auto; color: var(--faint); font-size: 0.75rem; }
+  header h1 { font-size: 14px; font-weight: 600; margin: 0; }
+  header .poll { margin-left: auto; color: var(--faint); font-size: 12px; }
   header .poll.err { color: var(--red); }
 
-  section { margin-top: 1.75rem; }
-  h2 {
-    font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--faint);
-    margin: 0 0 0.75rem;
-  }
-  .empty { color: var(--muted); }
-  .empty code { font-family: var(--mono); font-size: 0.8125rem; }
-
-  .pill {
-    display: inline-flex;
+  .toolbar {
+    display: flex;
     align-items: center;
-    gap: 0.375rem;
-    font-size: 0.8125rem;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .tabs { display: flex; gap: 1.25rem; align-self: stretch; }
+  .tabs button {
+    padding: 0.5rem 0 0.4rem;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    color: var(--muted);
     font-weight: 500;
   }
+  .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); }
+  .tabs .n { font-variant-numeric: tabular-nums; margin-left: 0.25rem; color: var(--faint); font-weight: 400; }
+  .tabs .alert { margin-left: 0.375rem; color: var(--red); font-weight: 400; }
+  .controls { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-left: auto; padding: 0.375rem 0; }
+
+  .segments { display: inline-flex; border: 1px solid var(--hairline); border-radius: 5px; overflow: hidden; }
+  .segments button { padding: 0.2rem 0.6rem; color: var(--muted); white-space: nowrap; }
+  .segments button + button { border-left: 1px solid var(--hairline); }
+  .segments button[aria-pressed="true"] { background: var(--chip); color: var(--fg); }
+  .segments button.zero { color: var(--faint); }
+  .segments .n { font-variant-numeric: tabular-nums; margin-left: 0.3rem; color: var(--faint); }
+
+  input[type="search"], select {
+    background: var(--bg);
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    padding: 0.2rem 0.5rem;
+    height: 1.75rem;
+  }
+  input[type="search"] { width: 15rem; }
+
+  .table-wrap { overflow-x: auto; }
+  .stale table { opacity: 0.5; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 0.4rem 0.625rem; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  th:first-child, td:first-child { padding-left: 0.25rem; }
+  th { font-weight: 500; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  th button { color: inherit; font-weight: inherit; }
+  th[aria-sort] button { color: var(--fg); }
+  th[aria-sort="ascending"] button::after { content: " ↑"; }
+  th[aria-sort="descending"] button::after { content: " ↓"; }
+  th.num, td.num { text-align: right; }
+  td.num { white-space: nowrap; }
+  td .zero { color: var(--faint); }
+  tbody.rows > tr.row:hover { background: var(--hover); }
+  tr.row.expandable { cursor: pointer; }
+  tr.row:has(button[aria-expanded="true"]) { background: var(--hover); }
+  tr.row:has(button[aria-expanded="true"]) > td { border-bottom-color: transparent; }
+  .name { font-weight: 500; white-space: nowrap; }
+  .name .caret { display: inline-block; width: 1rem; color: var(--muted); }
+  .lines > div { white-space: nowrap; }
+  .sub { color: var(--muted); margin-left: 0.4rem; }
+  .issue { color: var(--amber); }
+  td > .issue { display: block; min-width: 22rem; }
+  .tabs .alert span + span::before { content: " · "; color: var(--faint); }
+  .issue.problem { color: var(--red); }
+  .link { color: var(--blue); }
+  .link:hover { text-decoration: underline; }
+
+  .status { display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
   .dot {
     width: 0.5rem;
     height: 0.5rem;
@@ -82,28 +134,24 @@
     flex: none;
   }
   .dot.hollow { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+  .lines .dot { display: inline-block; margin-right: 0.4rem; vertical-align: 0.05em; }
 
-  .node {
-    display: flex;
-    align-items: baseline;
-    gap: 0.625rem;
-    padding: 0.25rem 0;
-  }
-  .node .id { font-weight: 500; }
-  .node .detail { color: var(--muted); font-family: var(--mono); font-size: 0.75rem; }
-  .node .age { margin-left: auto; color: var(--faint); font-size: 0.75rem; }
+  .empty { padding: 2rem 0.25rem; color: var(--muted); }
+  .empty button { margin-left: 0.5rem; }
 
-  .stream { padding: 0.875rem 0; }
-  .stream + .stream { border-top: 1px solid var(--hairline); }
-  .stream-head { display: flex; align-items: baseline; gap: 0.75rem; }
-  .stream-head .name { font-weight: 600; }
-  .stream-head .reason { color: var(--amber); font-size: 0.8125rem; }
+  tr.detail > td { background: var(--hover); padding: 0.25rem 0.625rem 1.25rem 1.125rem; }
+  .detail h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 1rem 0 0.375rem; }
+  .detail table { background: var(--bg); border: 1px solid var(--hairline); }
+  .detail th, .detail td { padding: 0.3rem 0.625rem; }
+  .detail th:first-child, .detail td:first-child { padding-left: 0.625rem; }
+  .detail tr:last-child td { border-bottom: 0; }
+  .detail tr.settled td { color: var(--muted); }
 
   .path {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    margin-top: 0.625rem;
+    margin-top: 0.75rem;
     overflow-x: auto;
     padding-bottom: 0.25rem;
   }
@@ -122,56 +170,51 @@
     border-width: 1px 1px 1px 0;
   }
   .redundant .branch { justify-content: flex-end; }
-  .route-id { font: 0.6875rem var(--mono); color: var(--muted); }
+  .route-id { font: 11px var(--mono); color: var(--muted); }
   .arrow, .fork { color: var(--faint); flex: none; }
 
   .chip {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    background: var(--chip);
-    border-radius: 6px;
-    padding: 0.25rem 0.625rem;
+    background: var(--bg);
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    padding: 0.125rem 0.5rem;
     line-height: 1.4rem;
     white-space: nowrap;
   }
-  .chip.addr { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
-  .chip .tag {
-    font-size: 0.625rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--faint);
-  }
+  .chip.addr { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .chip .tag { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--faint); }
   .chip.hop .role { font-weight: 500; }
-  .chip.hop .on { color: var(--muted); font-size: 0.8125rem; }
-  .chip.hop.unreported { box-shadow: inset 0 0 0 1px var(--hairline); background: transparent; }
+  .chip.hop .on { color: var(--muted); }
+  .chip.hop.unreported { border-style: dashed; }
   .chip.hop .conds { display: inline-flex; align-items: center; gap: 0.25rem; }
-  .chip.hop .conds .sep { color: var(--faint); font-size: 0.6875rem; }
-  .chip .rate { font-family: var(--mono); font-size: 0.6875rem; color: var(--muted); }
-  .chip .flag { font-size: 0.6875rem; color: var(--red); font-weight: 600; }
-
-  .legend { margin-top: 1.25rem; display: flex; gap: 1rem; color: var(--faint); font-size: 0.75rem; }
-  .legend .pill { font-size: inherit; font-weight: 400; }
+  .chip.hop .conds .sep { color: var(--faint); font-size: 11px; }
+  .chip .rate { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .chip .flag { font-size: 11px; color: var(--red); font-weight: 600; }
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>open-connect</h1>
-    <span class="pill" id="report-pill"><span class="dot"></span><span id="report-status">starting</span></span>
-    <span class="summary" id="report-summary"></span>
-    <span class="poll" id="poll">…</span>
+    <span id="report"></span>
+    <span class="muted" id="summary"></span>
+    <span class="poll" id="poll"></span>
   </header>
-  <section>
-    <h2>Nodes</h2>
-    <div id="nodes" class="empty">no nodes registered</div>
-  </section>
-  <section>
-    <h2>Streams</h2>
-    <div id="streams" class="empty">no streams — apply one: <code>just stream basic</code></div>
-    <div class="legend" id="legend"></div>
-  </section>
+  <div class="toolbar">
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-streams" data-tab="streams">Streams<span class="n"></span><span class="alert"></span></button>
+      <button role="tab" id="tab-nodes" data-tab="nodes">Nodes<span class="n"></span><span class="alert"></span></button>
+    </div>
+    <div class="controls">
+      <div class="segments" id="segments"></div>
+      <select id="node-filter" aria-label="Node"></select>
+      <input type="search" id="search" placeholder="Search" aria-label="Search" autocomplete="off" spellcheck="false">
+    </div>
+  </div>
+  <div id="content"></div>
 </main>
 <script>
 "use strict";
@@ -180,11 +223,17 @@ const COLORS = {
   flowing: "var(--green)", awaiting_input: "var(--blue)", degraded: "var(--amber)",
   failed: "var(--red)", pending: "var(--gray)", idle: "var(--gray)",
   converged: "var(--green)", converging: "var(--amber)", starting: "var(--gray)",
-  ready: "var(--green)", offline: "var(--red)",
+  ready: "var(--green)", offline: "var(--red)", unknown: "var(--gray)",
   connecting: "var(--amber)", connected: "var(--blue)", stalled: "var(--red)",
   unreachable: "var(--red)", lost: "var(--red)",
 };
-const HOLLOW = new Set(["idle", "pending", "connecting", "starting", "unreported"]);
+const HOLLOW = new Set(["idle", "pending", "connecting", "starting", "unreported", "unknown"]);
+const PROBLEM = new Set(["failed", "degraded", "offline", "stalled", "unreachable", "lost"]);
+const SEVERITY = {
+  failed: 0, offline: 0, degraded: 1, unknown: 2, pending: 2, awaiting_input: 3, idle: 4, flowing: 5, ready: 5,
+};
+const STREAM_STATUSES = ["flowing", "degraded", "failed", "awaiting_input", "pending", "idle"];
+const NODE_STATUSES = ["ready", "degraded", "offline", "unknown"];
 const INPUT_TRANSPORT = "input";
 const OUTPUT_TRANSPORT = "output";
 
@@ -205,37 +254,18 @@ function dot(status, title) {
   return el;
 }
 
-function pill(status) {
-  const el = h("span", "pill", dot(status), status);
-  el.style.color = COLORS[status] || "var(--gray)";
+function words(value) {
+  return String(value).replace(/_/g, " ");
+}
+
+function statusCell(status) {
+  const el = h("span", "status", dot(status), words(status));
+  if (PROBLEM.has(status)) el.style.color = COLORS[status];
   return el;
 }
 
-function renderHeader(report) {
-  const status = report ? report.status : "starting";
-  const pillEl = document.getElementById("report-pill");
-  pillEl.style.color = COLORS[status] || "var(--gray)";
-  pillEl.querySelector(".dot").className = "dot" + (HOLLOW.has(status) ? " hollow" : "");
-  document.getElementById("report-status").textContent = status;
-  document.getElementById("report-summary").textContent = report ? report.summary : "";
-}
-
-function renderNodes(nodes) {
-  const root = document.getElementById("nodes");
-  if (!nodes.length) { root.className = "empty"; root.textContent = "no nodes registered"; return; }
-  root.className = "";
-  root.replaceChildren(...nodes.map(node => {
-    const details = (node.topology.attachments || []).map(attachment => {
-      const listeners = Object.keys(attachment.listeners || {}).join(",");
-      return `${attachment.id} ${attachment.network}${attachment.dial ? " dial" : ""}${listeners ? ` listen:${listeners}` : ""}`;
-    });
-    return h("div", "node",
-      dot(node.status, node.status),
-      h("span", "id", node.id),
-      h("span", "detail", details.join(" · ")),
-      node.last_seen_secs == null ? null : h("span", "age", `seen ${node.last_seen_secs}s ago`),
-    );
-  }));
+function mbps(value) {
+  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
 }
 
 function rate(hop) {
@@ -243,8 +273,7 @@ function rate(hop) {
   const down = inputs.reduce((sum, input) => sum + (input.stats?.rate_mbps || 0), 0);
   const up = hop.egresses.reduce((sum, egress) => sum + ((egress.stats && egress.stats.rate_mbps) || 0), 0);
   if (!inputs.some(input => input.stats) && !hop.egresses.some(egress => egress.stats)) return null;
-  const fmt = v => (v >= 10 ? v.toFixed(0) : v.toFixed(1));
-  const el = h("span", "rate", `↓${fmt(down || 0)} ↑${fmt(up)} Mb/s`);
+  const el = h("span", "rate", `↓${mbps(down || 0)} ↑${mbps(up)} Mb/s`);
   el.title = "ingress / egress rate";
   return el;
 }
@@ -362,72 +391,606 @@ function renderPath(stream) {
   return path;
 }
 
-function renderStreams(streams) {
-  const root = document.getElementById("streams");
-  if (!streams.length) {
-    root.className = "empty";
-    root.replaceChildren("no streams — apply one: ", h("code", null, "just stream basic"));
-    return;
+function sum(items, value) {
+  let total = 0;
+  let any = false;
+  for (const item of items) {
+    const v = value(item);
+    if (v == null) continue;
+    total += v;
+    any = true;
   }
-  root.className = "";
-  root.replaceChildren(...streams.map(stream =>
-    h("div", "stream",
-      h("div", "stream-head",
-        h("span", "name", stream.name),
-        pill(stream.status),
-        h("span", null, `format policy: ${stream.format_policy}`),
-        stream.reason ? h("span", "reason", stream.reason) : null,
-      ),
-      ...stream.conditions.filter(c => c.type === "format_compatible").map(c =>
-        h("div", null, `declared compatibility: ${c.status} (${c.reason}): ${c.detail}`)),
-      ...stream.destinations.map(d => h("div", null,
-        `${d.id}: ` + d.conditions.filter(c => c.type === "format_compatible")
-          .map(c => `${c.status} (${c.reason}): ${c.detail}`).join("; "))),
-      ...stream.destinations.filter(d => d.delivery).map(d => h("div", null,
-        `${d.id}: ${d.delivery.selected_latency_ms == null ? d.delivery.state : d.delivery.selected_latency_ms + " ms"}` +
-        ` · timing ${d.delivery.timing_ready ? "ready" : d.delivery.reason}` +
-        ` · redundancy ${d.delivery.redundancy_ready ? "ready" : "degraded"}` +
-        (d.delivery.hold_us == null ? "" : ` · hold ${Math.round(d.delivery.hold_us / 1000)} of ${Math.round((d.delivery.skew_us ?? 0) / 1000)} ms skew`) +
-        ` · released ${d.delivery.counters.released}, missed ${d.delivery.counters.unrecovered}, late copies ${d.delivery.counters.late_arrivals}`)),
-      stream.hops.length ? renderPath(stream) : null,
-    )
-  ));
+  return any ? total : null;
 }
 
-function renderLegend() {
-  document.getElementById("legend").replaceChildren(
-    ...["idle", "connecting", "connected", "flowing", "stalled", "unreachable", "lost"].map(c => pill(c)),
+function ingresses(hop) {
+  return [hop.ingress, hop.merge_ingress].filter(Boolean);
+}
+
+function describeSocket(socket) {
+  if (socket.transport === INPUT_TRANSPORT || socket.transport === OUTPUT_TRANSPORT) return `${socket.transport} ${socket.id}`;
+  const address = socket.url || (socket.host ? `${socket.host}:${socket.port}` : socket.port != null ? `:${socket.port}` : socket.id);
+  return [socket.transport, socket.mode, address].filter(Boolean).join(" ");
+}
+
+function ago(secs) {
+  if (secs == null) return "";
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
+}
+
+function since(iso) {
+  const time = Date.parse(iso);
+  return Number.isNaN(time) ? "" : ago(Math.max(0, Math.round((Date.now() - time) / 1000)));
+}
+
+function streamModel(stream) {
+  const sender = stream.hops.find(hop => hop.role === "sender") || stream.hops[0];
+  const receivers = stream.hops.filter(hop => hop.role === "receiver");
+  const endpoints = stream.endpoints?.destinations || [];
+  const allIngress = stream.hops.flatMap(ingresses);
+  const allEgress = stream.hops.flatMap(hop => hop.egresses);
+
+  let source = "";
+  if (sender?.ingress.transport === INPUT_TRANSPORT) source = sender.ingress.id;
+  else if (stream.endpoints?.ingress) source = stream.endpoints.ingress.url;
+  else if (sender) source = describeSocket(sender.ingress);
+
+  const destinations = stream.destinations.map(destination => {
+    const branches = [destination.id, `${destination.id}.2`];
+    const receiver = receivers.find(hop => hop.egresses.some(egress => egress.branch_id === destination.id));
+    const endpoint = endpoints.find(entry => entry.id === destination.id)?.endpoint;
+    return {
+      id: destination.id,
+      status: destination.status,
+      node: receiver?.node || endpoint?.url || "",
+      via: stream.hops
+        .filter(hop => hop.role === "bridge" && hop.egresses.some(egress => branches.includes(egress.branch_id)))
+        .map(hop => hop.node),
+      redundant: Boolean(receiver?.merge_ingress),
+    };
+  });
+
+  let issue = stream.reason || "";
+  if (!issue) {
+    for (const hop of stream.hops) {
+      if (hop.state === "failed") { issue = `${hop.role} on ${hop.node} failed`; break; }
+      const bad = [...ingresses(hop), ...hop.egresses].find(socket => PROBLEM.has(socket.condition));
+      if (bad) { issue = `${hop.role} on ${hop.node}: ${bad.branch_id ? `${bad.branch_id} ` : ""}${bad.condition}`; break; }
+    }
+  }
+
+  const format = stream.conditions.find(condition => condition.type === "format_compatible");
+  const text = [
+    stream.name, stream.status, source,
+    ...destinations.flatMap(destination => [destination.id, destination.node, ...destination.via]),
+    ...stream.hops.flatMap(hop => [hop.id, hop.node, hop.profile_id, ...[...ingresses(hop), ...hop.egresses].map(describeSocket)]),
+  ].join(" ").toLowerCase();
+
+  return {
+    stream,
+    name: stream.name,
+    status: stream.status,
+    source,
+    sourceNode: sender?.node || "",
+    destinations,
+    rate: sender ? sum(ingresses(sender), socket => socket.stats?.rate_mbps) : null,
+    lost: sum(allIngress, socket => socket.stats?.packets_received_lost),
+    recovered: sum(allIngress, socket => socket.stats?.packets_recovered),
+    retransmitted: sum(allEgress, socket => socket.stats?.packets_retransmitted),
+    format: format ? format.status : null,
+    formatDetail: format ? format.detail : "",
+    issue,
+    nodes: new Set([...stream.nodes, ...stream.hops.map(hop => hop.node)]),
+    text,
+  };
+}
+
+function nodeModel(node, streams) {
+  const hops = streams.flatMap(stream => stream.hops.filter(hop => hop.node === node.id));
+  const attachments = node.topology.attachments || [];
+  const listeners = attachment => Object.entries(attachment.listeners || {}).map(([transport, listener]) => {
+    const range = listener.port_range;
+    return `${transport} ${range ? `${range.start}–${range.end}` : listener.port ?? ""}`.trim();
+  });
+  return {
+    node,
+    id: node.id,
+    status: node.status,
+    attachments: attachments.map(attachment => ({
+      id: attachment.id,
+      network: attachment.network,
+      dial: attachment.dial,
+      listeners: listeners(attachment),
+    })),
+    hops: hops.length,
+    streams: streams.filter(stream => stream.nodes.includes(node.id) || stream.hops.some(hop => hop.node === node.id)).length,
+    rateIn: sum(hops.flatMap(ingresses), socket => socket.stats?.rate_mbps),
+    rateOut: sum(hops.flatMap(hop => hop.egresses), socket => socket.stats?.rate_mbps),
+    lastSeen: node.last_seen_secs,
+    endpoint: node.endpoint,
+    text: [node.id, node.status, node.endpoint, ...attachments.flatMap(attachment => [attachment.id, attachment.network, ...listeners(attachment)])]
+      .join(" ").toLowerCase(),
+  };
+}
+
+function numberCell(value, format = v => v.toLocaleString()) {
+  if (value == null) return h("span", "zero", "–");
+  return value === 0 ? h("span", "zero", format(0)) : format(value);
+}
+
+function compare(a, b) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b));
+}
+
+const STREAM_COLUMNS = [
+  { key: "status", label: "Status", sort: row => SEVERITY[row.status], cell: row => statusCell(row.status) },
+  {
+    key: "name", label: "Stream", sort: row => row.name,
+    cell: (row, open) => {
+      const button = h("button", "name", h("span", "caret", open ? "▾" : "▸"), row.name);
+      button.setAttribute("aria-expanded", String(open));
+      return button;
+    },
+  },
+  {
+    key: "source", label: "Source", sort: row => row.sourceNode + row.source,
+    cell: row => h("span", "lines", h("div", null, row.source, row.sourceNode ? h("span", "sub", row.sourceNode) : null)),
+  },
+  {
+    key: "destinations", label: "Destinations", sort: row => row.destinations.length,
+    cell: row => h("div", "lines", ...row.destinations.map(destination => h("div", null,
+      dot(destination.status, destination.status),
+      destination.id,
+      destination.node ? h("span", "sub", destination.node) : null,
+      destination.via.length ? h("span", "sub", `via ${[...new Set(destination.via)].join(", ")}`) : null,
+      destination.redundant ? h("span", "sub", "2 paths") : null,
+    ))),
+  },
+  { key: "rate", label: "Mb/s", num: true, sort: row => row.rate, cell: row => numberCell(row.rate, mbps) },
+  { key: "lost", label: "Lost", num: true, sort: row => row.lost, cell: row => numberCell(row.lost) },
+  { key: "recovered", label: "Recovered", num: true, sort: row => row.recovered, cell: row => numberCell(row.recovered) },
+  { key: "retransmitted", label: "Retx", num: true, sort: row => row.retransmitted, cell: row => numberCell(row.retransmitted) },
+  {
+    key: "format", label: "Format", sort: row => row.format,
+    cell: row => {
+      if (!row.format) return null;
+      const el = h("span", null, row.format === "true" ? "compatible" : row.format === "false" ? "mismatch" : "unknown");
+      el.className = row.format === "false" ? "issue problem" : row.format === "true" ? "" : "muted";
+      el.title = row.formatDetail;
+      return el;
+    },
+  },
+  {
+    key: "issue", label: "Issue", sort: row => row.issue || null,
+    cell: row => row.issue ? h("span", "issue" + (PROBLEM.has(row.status) ? " problem" : ""), row.issue) : null,
+  },
+];
+
+const NODE_COLUMNS = [
+  { key: "status", label: "Status", sort: row => SEVERITY[row.status], cell: row => statusCell(row.status) },
+  { key: "id", label: "Node", sort: row => row.id, cell: row => h("span", "name", row.id) },
+  {
+    key: "attachments", label: "Attachments", sort: row => row.attachments.map(a => a.network).join(" "),
+    cell: row => h("div", "lines", ...row.attachments.map(attachment => h("div", null,
+      attachment.id,
+      h("span", "sub", attachment.network),
+      attachment.dial ? h("span", "sub", "dial") : null,
+      ...attachment.listeners.map(listener => h("span", "sub mono", `listen ${listener}`)),
+    ))),
+  },
+  {
+    key: "streams", label: "Streams", num: true, sort: row => row.streams,
+    cell: row => {
+      if (!row.streams) return numberCell(0);
+      const el = h("button", "link", String(row.streams));
+      el.dataset.node = row.id;
+      return el;
+    },
+  },
+  { key: "hops", label: "Hops", num: true, sort: row => row.hops, cell: row => numberCell(row.hops) },
+  { key: "rateIn", label: "In Mb/s", num: true, sort: row => row.rateIn, cell: row => numberCell(row.rateIn, mbps) },
+  { key: "rateOut", label: "Out Mb/s", num: true, sort: row => row.rateOut, cell: row => numberCell(row.rateOut, mbps) },
+  { key: "lastSeen", label: "Last seen", num: true, sort: row => row.lastSeen, cell: row => ago(row.lastSeen) },
+  { key: "endpoint", label: "Endpoint", sort: row => row.endpoint, cell: row => h("span", "mono muted", row.endpoint) },
+];
+
+function linksTable(stream) {
+  const body = h("tbody");
+  for (const hop of stream.hops) {
+    const sockets = [
+      ["in", hop.ingress],
+      ...(hop.merge_ingress ? [["in 2", hop.merge_ingress]] : []),
+      ...hop.egresses.map(egress => [`out ${egress.branch_id}`, egress]),
+    ];
+    sockets.forEach(([side, socket], index) => {
+      const condition = socket.condition || (hop.state == null ? "unreported" : null);
+      const stats = socket.stats;
+      body.append(h("tr", null,
+        h("td", null, index === 0 ? h("span", null,
+          h("span", "name", hop.role), h("span", "sub", hop.node),
+          hop.state === "failed" ? h("span", "issue problem", " failed") : null,
+          hop.state == null ? h("span", "sub", "unreported") : null,
+        ) : null),
+        h("td", "muted", side),
+        h("td", "mono", describeSocket(socket)),
+        h("td", null, condition ? statusCell(condition) : null),
+        h("td", "num", stats ? numberCell(stats.rate_mbps, mbps) : null),
+        h("td", "num", stats ? numberCell(stats.packets_received_lost) : null),
+        h("td", "num", stats ? numberCell(stats.packets_recovered) : null),
+        h("td", "num", stats ? numberCell(stats.packets_retransmitted) : null),
+        h("td", "num", stats ? numberCell(stats.connections) : null),
+      ));
+    });
+  }
+  return detailTable(["Hop", "Side", "Socket", "Condition", "Mb/s", "Lost", "Recovered", "Retx", "Conns"], body, [4, 5, 6, 7, 8]);
+}
+
+function destinationsTable(stream) {
+  const delivered = stream.destinations.some(destination => destination.delivery);
+  const endpoints = stream.endpoints?.destinations || [];
+  const body = h("tbody");
+  for (const destination of stream.destinations) {
+    const endpoint = endpoints.find(entry => entry.id === destination.id)?.endpoint || destination.endpoint;
+    const delivery = destination.delivery;
+    const row = h("tr", null,
+      h("td", "name", destination.id),
+      h("td", null, statusCell(destination.status)),
+      h("td", null, destination.nodes.join(" → ")),
+      h("td", "mono", endpoint?.url || ""),
+    );
+    if (delivered) {
+      const ms = us => us == null ? "" : `${Math.round(us / 1000)} ms`;
+      row.append(
+        h("td", null, delivery ? statusCell(delivery.state) : null),
+        h("td", "num", delivery?.selected_latency_ms == null ? "" : `${delivery.selected_latency_ms} ms`),
+        h("td", null, delivery ? (delivery.timing_ready ? "ready" : words(delivery.reason)) : ""),
+        h("td", null, delivery ? (delivery.redundancy_ready ? "ready" : "degraded") : ""),
+        h("td", "num", ms(delivery?.hold_us)),
+        h("td", "num", ms(delivery?.skew_us)),
+        h("td", "num", delivery ? numberCell(delivery.counters.released) : null),
+        h("td", "num", delivery ? numberCell(delivery.counters.unrecovered) : null),
+        h("td", "num", delivery ? numberCell(delivery.counters.late_arrivals) : null),
+      );
+    }
+    body.append(row);
+  }
+  const headings = ["Destination", "Status", "Nodes", "Endpoint"];
+  if (delivered) headings.push("Delivery", "Latency", "Timing", "Redundancy", "Hold", "Skew", "Released", "Missed", "Late copies");
+  return detailTable(headings, body, delivered ? [5, 8, 9, 10, 11, 12] : []);
+}
+
+function conditionsTable(stream) {
+  const key = condition => [condition.type, condition.status, condition.reason, condition.detail].join("\u0000");
+  const shared = new Set(stream.conditions.map(key));
+  const rows = [
+    ...stream.conditions.map(condition => ["stream", condition]),
+    ...stream.destinations.flatMap(destination => destination.conditions
+      .filter(condition => !shared.has(key(condition)))
+      .map(condition => [destination.id, condition])),
+  ];
+  const body = h("tbody");
+  for (const [scope, condition] of rows) {
+    const row = h("tr", condition.status === "true" ? "settled" : null,
+      h("td", null, scope),
+      h("td", null, words(condition.type)),
+      h("td", condition.status === "false" ? "issue problem" : null, condition.status),
+      h("td", "mono", condition.reason),
+      h("td", null, condition.detail),
+      h("td", "num", since(condition.last_transition_time)),
+    );
+    row.lastChild.title = condition.last_transition_time || "";
+    body.append(row);
+  }
+  return detailTable(["Scope", "Condition", "Status", "Reason", "Detail", "Since"], body, [5]);
+}
+
+function detailTable(headings, body, numeric) {
+  const head = h("tr", null, ...headings.map((heading, index) => h("th", numeric.includes(index) ? "num" : null, heading)));
+  return h("div", "table-wrap", h("table", null, h("thead", null, head), body));
+}
+
+function streamDetail(stream) {
+  return h("div", null,
+    stream.hops.length ? renderPath(stream) : null,
+    stream.hops.length ? h("h3", null, "Links") : null,
+    stream.hops.length ? linksTable(stream) : null,
+    h("h3", null, "Destinations"),
+    destinationsTable(stream),
+    h("h3", null, "Conditions"),
+    conditionsTable(stream),
   );
 }
 
-async function poll() {
+const state = {
+  tab: "streams",
+  query: "",
+  status: { streams: "", nodes: "" },
+  node: "",
+  open: new Set(),
+  sort: { streams: { key: "status", dir: 1 }, nodes: { key: "status", dir: 1 } },
+  view: null,
+};
+
+function readHash() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  state.tab = params.get("tab") === "nodes" ? "nodes" : "streams";
+  state.query = params.get("q") || "";
+  state.status.streams = params.get("stream-status") || "";
+  state.status.nodes = params.get("node-status") || "";
+  state.node = params.get("node") || "";
+  state.open = new Set((params.get("open") || "").split(",").filter(Boolean));
+}
+
+function writeHash() {
+  const params = new URLSearchParams();
+  if (state.tab !== "streams") params.set("tab", state.tab);
+  if (state.query) params.set("q", state.query);
+  if (state.status.streams) params.set("stream-status", state.status.streams);
+  if (state.status.nodes) params.set("node-status", state.status.nodes);
+  if (state.node) params.set("node", state.node);
+  if (state.open.size) params.set("open", [...state.open].join(","));
+  const hash = params.toString();
+  history.replaceState(null, "", hash ? `#${hash}` : location.pathname + location.search);
+}
+
+function models() {
+  const view = state.view || { nodes: [], streams: [] };
+  return {
+    streams: view.streams.map(streamModel),
+    nodes: view.nodes.map(node => nodeModel(node, view.streams)),
+  };
+}
+
+function matches(row, tab) {
+  if (state.status[tab] && row.status !== state.status[tab]) return false;
+  if (tab === "streams" && state.node && !row.nodes.has(state.node)) return false;
+  const terms = state.query.toLowerCase().split(/\s+/).filter(Boolean);
+  return terms.every(term => row.text.includes(term));
+}
+
+function sorted(rows, columns, sort) {
+  const column = columns.find(entry => entry.key === sort.key) || columns[0];
+  const name = row => row.name ?? row.id;
+  return [...rows].sort((a, b) => {
+    const primary = compare(column.sort(a), column.sort(b));
+    if (primary !== 0) return column.sort(a) == null || column.sort(b) == null ? primary : primary * sort.dir;
+    return compare(name(a), name(b));
+  });
+}
+
+function renderTabs(data) {
+  for (const tab of ["streams", "nodes"]) {
+    const button = document.getElementById(`tab-${tab}`);
+    button.setAttribute("aria-selected", String(state.tab === tab));
+    button.querySelector(".n").textContent = String(data[tab].length);
+    button.querySelector(".alert").replaceChildren(...[...PROBLEM]
+      .map(status => [status, data[tab].filter(row => row.status === status).length])
+      .filter(([, n]) => n > 0)
+      .map(([status, n]) => {
+        const el = h("span", null, `${n} ${words(status)}`);
+        el.style.color = COLORS[status];
+        return el;
+      }));
+  }
+}
+
+function renderSegments(rows) {
+  const statuses = state.tab === "streams" ? STREAM_STATUSES : NODE_STATUSES;
+  const active = state.status[state.tab];
+  const segment = (value, text, n) => {
+    const button = h("button", n === 0 ? "zero" : null, text, h("span", "n", String(n)));
+    button.dataset.status = value;
+    button.setAttribute("aria-pressed", String(active === value));
+    return button;
+  };
+  document.getElementById("segments").replaceChildren(
+    segment("", "All", rows.length),
+    ...statuses.map(status => {
+      const text = words(status);
+      return segment(status, text[0].toUpperCase() + text.slice(1), rows.filter(row => row.status === status).length);
+    }),
+  );
+}
+
+function renderNodeFilter(nodes) {
+  const select = document.getElementById("node-filter");
+  select.hidden = state.tab !== "streams";
+  const ids = nodes.map(node => node.id).sort();
+  if (state.node && !ids.includes(state.node)) ids.unshift(state.node);
+  const options = [h("option", null, "All nodes"), ...ids.map(id => h("option", null, id))];
+  options[0].value = "";
+  ids.forEach((id, index) => { options[index + 1].value = id; });
+  select.replaceChildren(...options);
+  select.value = state.node;
+}
+
+function renderTable(rows, columns, tab) {
+  const sort = state.sort[tab];
+  const head = h("tr", null, ...columns.map(column => {
+    const th = h("th", column.num ? "num" : null);
+    const button = h("button", null, column.label);
+    button.dataset.sort = column.key;
+    th.append(button);
+    if (sort.key === column.key) th.setAttribute("aria-sort", sort.dir === 1 ? "ascending" : "descending");
+    return th;
+  }));
+  const body = h("tbody", "rows");
+  for (const row of sorted(rows, columns, sort)) {
+    const open = tab === "streams" && state.open.has(row.name);
+    const tr = h("tr", "row" + (tab === "streams" ? " expandable" : ""),
+      ...columns.map(column => h("td", column.num ? "num" : null, column.cell(row, open))));
+    if (tab === "streams") tr.dataset.stream = row.name;
+    body.append(tr);
+    if (open) {
+      const td = h("td", null, streamDetail(row.stream));
+      td.colSpan = columns.length;
+      body.append(h("tr", "detail", td));
+    }
+  }
+  return h("div", "table-wrap", h("table", null, h("thead", null, head), body));
+}
+
+function focusSelector() {
+  const el = document.activeElement;
+  if (!el || el.tagName !== "BUTTON") return null;
+  const row = el.closest("tr[data-stream]");
+  if (row) return `tr[data-stream="${CSS.escape(row.dataset.stream)}"] button.name`;
+  for (const attribute of ["sort", "status", "node", "tab"]) {
+    if (el.dataset[attribute] != null) return `[data-${attribute}="${CSS.escape(el.dataset[attribute])}"]`;
+  }
+  return null;
+}
+
+function render() {
+  const focus = focusSelector();
+  rebuild();
+  if (focus) document.querySelector(focus)?.focus();
+}
+
+function rebuild() {
+  const data = models();
+  const rows = data[state.tab];
+  renderTabs(data);
+  renderSegments(rows);
+  renderNodeFilter(data.nodes);
+  const content = document.getElementById("content");
+  const visible = rows.filter(row => matches(row, state.tab));
+  if (!state.view) {
+    content.replaceChildren();
+  } else if (!rows.length) {
+    content.replaceChildren(h("div", "empty", state.tab === "streams" ? "No streams" : "No nodes registered"));
+  } else if (!visible.length) {
+    const clear = h("button", "link", "Clear filters");
+    clear.dataset.clear = "";
+    content.replaceChildren(h("div", "empty", `No matching ${state.tab}`, clear));
+  } else {
+    content.replaceChildren(renderTable(visible, state.tab === "streams" ? STREAM_COLUMNS : NODE_COLUMNS, state.tab));
+  }
+  writeHash();
+}
+
+function renderHeader(report) {
+  const status = report ? report.status : "starting";
+  document.getElementById("report").replaceChildren(statusCell(status));
+  document.getElementById("summary").textContent = report ? report.summary : "";
+}
+
+function selecting() {
+  const selection = document.getSelection();
+  return selection && !selection.isCollapsed && document.getElementById("content").contains(selection.anchorNode);
+}
+
+function setPoll(text, error) {
   const el = document.getElementById("poll");
+  el.className = "poll" + (error ? " err" : "");
+  el.textContent = text;
+  document.getElementById("content").classList.toggle("stale", Boolean(error) && state.view != null);
+}
+
+async function poll() {
   try {
     const response = await fetch("/view");
     if (response.status === 503) {
       const body = await response.json().catch(() => ({}));
       if (body.code === "not_leader") {
-        el.className = "poll err";
-        el.textContent = "standby: another controller leads";
+        setPoll("standby: another controller leads", true);
         return;
       }
     }
     if (!response.ok) throw new Error(response.status);
-    const view = await response.json();
-    renderHeader(view.report);
-    renderNodes(view.nodes);
-    renderStreams(view.streams);
-    el.className = "poll";
-    el.textContent = new Date().toLocaleTimeString();
+    state.view = await response.json();
+    renderHeader(state.view.report);
+    setPoll(`updated ${new Date().toLocaleTimeString()}`, false);
+    if (!selecting()) render();
   } catch {
-    el.className = "poll err";
-    el.textContent = "controller unreachable";
+    setPoll("controller unreachable", true);
   }
 }
 
-renderLegend();
-poll();
-setInterval(poll, 2000);
+function boot() {
+  readHash();
+  document.getElementById("search").value = state.query;
+
+  document.querySelector(".tabs").addEventListener("click", event => {
+    const button = event.target.closest("[data-tab]");
+    if (!button) return;
+    state.tab = button.dataset.tab;
+    render();
+  });
+  document.getElementById("segments").addEventListener("click", event => {
+    const button = event.target.closest("[data-status]");
+    if (!button) return;
+    state.status[state.tab] = button.dataset.status;
+    render();
+  });
+  document.getElementById("node-filter").addEventListener("change", event => {
+    state.node = event.target.value;
+    render();
+  });
+  document.getElementById("search").addEventListener("input", event => {
+    state.query = event.target.value;
+    render();
+  });
+  document.getElementById("content").addEventListener("click", event => {
+    const sort = event.target.closest("[data-sort]");
+    const node = event.target.closest("[data-node]");
+    const clear = event.target.closest("[data-clear]");
+    const row = event.target.closest("tr[data-stream]");
+    if (sort) {
+      const current = state.sort[state.tab];
+      state.sort[state.tab] = current.key === sort.dataset.sort
+        ? { key: current.key, dir: -current.dir }
+        : { key: sort.dataset.sort, dir: 1 };
+    } else if (node) {
+      state.tab = "streams";
+      state.node = node.dataset.node;
+      state.status.streams = "";
+    } else if (clear != null) {
+      state.query = "";
+      state.node = "";
+      state.status[state.tab] = "";
+      document.getElementById("search").value = "";
+    } else if (row && !selecting()) {
+      const name = row.dataset.stream;
+      if (state.open.has(name)) state.open.delete(name);
+      else state.open.add(name);
+    } else {
+      return;
+    }
+    render();
+  });
+  window.addEventListener("hashchange", () => {
+    readHash();
+    document.getElementById("search").value = state.query;
+    render();
+  });
+  document.addEventListener("keydown", event => {
+    const search = document.getElementById("search");
+    if (event.key === "/" && document.activeElement !== search && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      search.focus();
+      search.select();
+    } else if (event.key === "Escape" && document.activeElement === search) {
+      search.value = "";
+      state.query = "";
+      search.blur();
+      render();
+    }
+  });
+
+  renderHeader(null);
+  render();
+  poll();
+  setInterval(poll, 2000);
+}
+
+boot();
 </script>
 </body>
 </html>
