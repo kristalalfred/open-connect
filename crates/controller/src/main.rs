@@ -5363,10 +5363,11 @@ mod tests {
             id: "music".to_string(),
             network: None,
         });
-        spec.destinations[0].endpoint = StreamTransport::Output(connect_core::LocalEndpoint {
+        spec.destinations[0].endpoint = StreamTransport::Output(connect_core::OutputEndpoint {
             node: "alfreds-mac".to_string(),
             id: "speakers".to_string(),
             network: None,
+            latency: None,
         });
         state
             .streams

@@ -2003,10 +2003,11 @@ pub(crate) mod tests {
         assert_eq!(cam.spec.destinations[0].id, "studio");
         assert_eq!(
             cam.spec.destinations[1].endpoint,
-            StreamTransport::Output(connect_core::LocalEndpoint {
+            StreamTransport::Output(connect_core::OutputEndpoint {
                 node: "browser-c3d4".into(),
                 id: "player".into(),
                 network: Some("internet".into()),
+                latency: None,
             })
         );
         assert_eq!((cam.generation, cam.revision), (1, 900));

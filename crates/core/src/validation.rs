@@ -4,9 +4,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DeclaredNode, FormatConstraint, HopEndpointClass, LocalEnd, LocalEndpoint, MediaFormat,
-    NodeInput, NodeObservation, NodeOutput, Passphrase, SITE_NETWORK_PREFIX, SignallingEndpoint,
-    SrtEndpoint, StreamDefinition, StreamDestination, StreamTransport,
+    DeclaredNode, FormatConstraint, HopEndpointClass, LocalEnd, MediaFormat, NodeInput,
+    NodeObservation, NodeOutput, Passphrase, SITE_NETWORK_PREFIX, SignallingEndpoint, SrtEndpoint,
+    StreamDefinition, StreamDestination, StreamTransport,
 };
 
 pub const RESOURCE_ID_MAX_LEN: usize = 63;
@@ -453,7 +453,13 @@ fn validate_transport(
                     "input belongs on the source, not a destination",
                 ));
             }
-            validate_local_endpoint(endpoint, &path, issues);
+            validate_local_endpoint(
+                &endpoint.node,
+                &endpoint.id,
+                endpoint.network.as_deref(),
+                &path,
+                issues,
+            );
         }
         StreamTransport::Output(endpoint) => {
             let path = format!("{path}.output");
@@ -464,7 +470,13 @@ fn validate_transport(
                     "output belongs on a destination, not the source",
                 ));
             }
-            validate_local_endpoint(endpoint, &path, issues);
+            validate_local_endpoint(
+                &endpoint.node,
+                &endpoint.id,
+                endpoint.network.as_deref(),
+                &path,
+                issues,
+            );
         }
         StreamTransport::Whip(endpoint) => {
             let path = format!("{path}.whip");
@@ -492,13 +504,15 @@ fn validate_transport(
 }
 
 fn validate_local_endpoint(
-    endpoint: &LocalEndpoint,
+    node: &str,
+    id: &str,
+    network: Option<&str>,
     path: &str,
     issues: &mut Vec<ValidationIssue>,
 ) {
-    validate_id(&endpoint.node, &format!("{path}.node"), "node id", issues);
-    validate_id(&endpoint.id, &format!("{path}.id"), "id", issues);
-    if let Some(network) = &endpoint.network {
+    validate_id(node, &format!("{path}.node"), "node id", issues);
+    validate_id(id, &format!("{path}.id"), "id", issues);
+    if let Some(network) = network {
         validate_id(network, &format!("{path}.network"), "network id", issues);
     }
 }
@@ -711,9 +725,9 @@ fn validate_constraint(accepts: &FormatConstraint, path: &str, issues: &mut Vec<
 mod tests {
     use crate::{
         AudioConstraint, Container, DeclaredNode, FormatConstraint, LocalEndpoint, MediaFormat,
-        NodeDescriptor, NodeInput, NodeObservation, NodeOutput, ReflexiveAddress, RemoteAddr,
-        SrtEndpoint, StreamDefinition, StreamDestination, StreamTransport, Track, Uplink,
-        VideoConstraint,
+        NodeDescriptor, NodeInput, NodeObservation, NodeOutput, OutputEndpoint, ReflexiveAddress,
+        RemoteAddr, SrtEndpoint, StreamDefinition, StreamDestination, StreamTransport, Track,
+        Uplink, VideoConstraint,
     };
 
     use super::{
@@ -773,6 +787,15 @@ mod tests {
         }
     }
 
+    fn output_end(node: &str, id: &str) -> OutputEndpoint {
+        OutputEndpoint {
+            node: node.to_string(),
+            id: id.to_string(),
+            network: None,
+            latency: None,
+        }
+    }
+
     fn local_stream(source: StreamTransport, destination_end: StreamTransport) -> StreamDefinition {
         StreamDefinition {
             name: "music".to_string(),
@@ -790,7 +813,7 @@ mod tests {
         assert!(
             validate_stream(&local_stream(
                 StreamTransport::Input(local("alfreds-mac", "music")),
-                StreamTransport::Output(local("filips-mac", "speakers")),
+                StreamTransport::Output(output_end("filips-mac", "speakers")),
             ))
             .is_empty()
         );
@@ -799,7 +822,7 @@ mod tests {
     #[test]
     fn an_input_is_only_a_source_and_an_output_only_a_destination() {
         let issues = validate_stream(&local_stream(
-            StreamTransport::Output(local("alfreds-mac", "speakers")),
+            StreamTransport::Output(output_end("alfreds-mac", "speakers")),
             StreamTransport::Input(local("filips-mac", "Music")),
         ));
         assert_eq!(
@@ -948,7 +971,7 @@ mod tests {
         });
         invalid.destinations.push(destination(
             "screen",
-            StreamTransport::Output(local(" ", "screen")),
+            StreamTransport::Output(output_end(" ", "screen")),
         ));
 
         assert_eq!(
@@ -1081,7 +1104,7 @@ mod tests {
         endpoint.via = vec!["relay.one".to_string()];
         invalid.destinations.push(destination(
             "display/one",
-            StreamTransport::Output(local("display/one", "screen")),
+            StreamTransport::Output(output_end("display/one", "screen")),
         ));
 
         let issues = validate_stream(&invalid);

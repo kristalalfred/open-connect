@@ -522,6 +522,14 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "latency": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "uint32",
+                      "minimum": 0
                     }
                   },
                   "required": [
@@ -1901,6 +1909,14 @@
                           "string",
                           "null"
                         ]
+                      },
+                      "latency": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "format": "uint32",
+                        "minimum": 0
                       }
                     },
                     "required": [

@@ -460,6 +460,14 @@
                           "string",
                           "null"
                         ]
+                      },
+                      "latency": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "format": "uint32",
+                        "minimum": 0
                       }
                     },
                     "additionalProperties": false,
@@ -1676,6 +1684,14 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "latency": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "format": "uint32",
+                          "minimum": 0
                         }
                       },
                       "additionalProperties": false,

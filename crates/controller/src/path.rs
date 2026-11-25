@@ -5,11 +5,11 @@ use std::sync::Arc;
 use connect_core::{
     DesiredEgress, DesiredHop, DestinationEndpoint, EndpointAddr, FecParams, HOP_ID_PREFIX,
     HopConditions, HopEndpointClass, HopRole, HopState, HopStatus, LinkCondition, LocalEnd,
-    LocalEndpoint, LocalSocket, NetworkAttachment, NodeDescriptor, NodeStatus, Passphrase, Path,
-    PathStatus, PeerAttempt, PeerLinkId, PortRange, RemoteAddr, ResolvedAddr, RistListener,
-    RistSocket, RtpParams, RtpSocket, SignallingEndpoint, SignallingTransport, SocketRole,
-    SocketSpec, SrtParams, SrtSocket, StreamDefinition, StreamEndpoints, StreamTransport, Track,
-    Transport, roll_up_path,
+    LocalSocket, NetworkAttachment, NodeDescriptor, NodeStatus, Passphrase, Path, PathStatus,
+    PeerAttempt, PeerLinkId, PortRange, RemoteAddr, ResolvedAddr, RistListener, RistSocket,
+    RtpParams, RtpSocket, SignallingEndpoint, SignallingTransport, SocketRole, SocketSpec,
+    SrtParams, SrtSocket, StreamDefinition, StreamEndpoints, StreamTransport, Track, Transport,
+    roll_up_path,
 };
 
 use crate::keys::LinkKeys;
@@ -214,21 +214,39 @@ fn read_endpoint(endpoint: &StreamTransport) -> Result<Endpoint<'_>, PlacementEr
             passphrase: endpoint.passphrase.as_ref(),
             terminal: Terminal::Srt,
         }),
-        StreamTransport::Input(endpoint) => Ok(local(endpoint, LocalEnd::Input)),
-        StreamTransport::Output(endpoint) => Ok(local(endpoint, LocalEnd::Output)),
+        StreamTransport::Input(endpoint) => Ok(local(
+            &endpoint.node,
+            &endpoint.id,
+            endpoint.network.as_deref(),
+            None,
+            LocalEnd::Input,
+        )),
+        StreamTransport::Output(endpoint) => Ok(local(
+            &endpoint.node,
+            &endpoint.id,
+            endpoint.network.as_deref(),
+            endpoint.latency,
+            LocalEnd::Output,
+        )),
         StreamTransport::Whip(endpoint) => Ok(signalled(endpoint, SignallingTransport::Whip)),
         StreamTransport::Whep(endpoint) => Ok(signalled(endpoint, SignallingTransport::Whep)),
     }
 }
 
-fn local(endpoint: &LocalEndpoint, end: LocalEnd) -> Endpoint<'_> {
+fn local<'a>(
+    node: &'a str,
+    id: &'a str,
+    network: Option<&'a str>,
+    latency: Option<u32>,
+    end: LocalEnd,
+) -> Endpoint<'a> {
     Endpoint {
-        placement: Placement::Node(&endpoint.node),
-        network: endpoint.network.as_deref(),
+        placement: Placement::Node(node),
+        network,
         via: &[],
-        latency: None,
+        latency,
         passphrase: None,
-        terminal: Terminal::Local(end, &endpoint.id),
+        terminal: Terminal::Local(end, id),
     }
 }
 
@@ -3105,6 +3123,7 @@ mod contract_tests {
         NodeCapabilities, NodeInput, NodeTopology, SignallingListener, SocketStatus, SrtEndpoint,
         SrtListener, StreamDestination, TransportClass,
     };
+    use connect_core::{LocalEndpoint, OutputEndpoint};
 
     fn keys() -> LinkKeys {
         LinkKeys::for_tests()
@@ -3210,6 +3229,101 @@ mod contract_tests {
                 vec![attachment("wan", "internet", true, Some("192.0.2.3"))],
             ),
         ]
+    }
+
+    fn local_profile(id: &str, ingress: HopEndpointClass, egress: HopEndpointClass) -> HopProfile {
+        HopProfile {
+            timed_delivery: None,
+            id: id.to_string(),
+            ingress,
+            egress,
+            max_egresses: Some(1),
+            media_behavior: connect_core::MediaBehavior::Preserve,
+            merge: false,
+            accepts: None,
+        }
+    }
+
+    fn output_link_latencies(latency: Option<u32>) -> Vec<Option<u32>> {
+        let mut sender = node(
+            "field-kit",
+            vec![attachment("cell", "internet", true, None)],
+        );
+        sender.inputs = vec![NodeInput {
+            id: "mic".to_string(),
+            label: "Mic".to_string(),
+            tracks: vec![Track::Audio],
+        }];
+        sender.capabilities.hop_profiles.push(local_profile(
+            "rtp-to-srt",
+            HopEndpointClass::Local(LocalEnd::Input),
+            class(Transport::Srt, connect_core::RoleSet::both()),
+        ));
+        let mut receiver = node("desk", vec![attachment("cell", "internet", true, None)]);
+        receiver.outputs = vec![connect_core::NodeOutput {
+            id: "speakers".to_string(),
+            label: "Speakers".to_string(),
+        }];
+        receiver.capabilities.hop_profiles.push(local_profile(
+            "srt-to-rtp",
+            class(Transport::Srt, connect_core::RoleSet::both()),
+            HopEndpointClass::Local(LocalEnd::Output),
+        ));
+        let relay = node(
+            "relay",
+            vec![attachment("wan", "internet", true, Some("192.0.2.9"))],
+        );
+        let stream = StreamDefinition {
+            name: "return".to_string(),
+            enabled: true,
+            format_policy: connect_core::FormatPolicy::Report,
+            allow_cleartext_links: false,
+            source: StreamTransport::Input(LocalEndpoint {
+                node: "field-kit".to_string(),
+                id: "mic".to_string(),
+                network: None,
+            }),
+            destinations: vec![StreamDestination {
+                delivery: None,
+                id: "desk".to_string(),
+                paths: 1,
+                endpoint: StreamTransport::Output(OutputEndpoint {
+                    node: "desk".to_string(),
+                    id: "speakers".to_string(),
+                    network: None,
+                    latency,
+                }),
+            }],
+        };
+        let path = derive_path(
+            &stream,
+            &[sender, receiver, relay],
+            &[],
+            &mut PortAllocator::new(),
+            &keys(),
+        )
+        .unwrap();
+        assert_eq!(path.hops.len(), 3, "sender, relay, receiver");
+        path.hops
+            .iter()
+            .flat_map(|hop| {
+                std::iter::once(&hop.ingress)
+                    .chain(hop.egresses.iter().map(|egress| &egress.socket))
+            })
+            .filter_map(|socket| match socket {
+                SocketSpec::Srt(socket) => Some(socket.params().latency),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_outputs_latency_sets_every_link_on_the_way_to_it() {
+        assert_eq!(output_link_latencies(Some(40)), vec![Some(40); 4]);
+        assert_eq!(
+            output_link_latencies(None),
+            vec![Some(DEFAULT_SINK_LATENCY); 4]
+        );
     }
 
     #[test]
@@ -3842,6 +3956,7 @@ mod tests {
         SignallingListener, SignallingTransport, SocketStatus, SrtEndpoint, SrtListener,
         StreamDestination, TransportClass,
     };
+    use connect_core::{LocalEndpoint, OutputEndpoint};
 
     const SHARED: &str = "internet";
 
@@ -5453,10 +5568,11 @@ mod tests {
             delivery: None,
             id: id.to_string(),
             paths: 1,
-            endpoint: StreamTransport::Output(LocalEndpoint {
+            endpoint: StreamTransport::Output(OutputEndpoint {
                 node: node.to_string(),
                 id: output.to_string(),
                 network: None,
+                latency: None,
             }),
         }
     }
@@ -5985,10 +6101,11 @@ mod tests {
     #[test]
     fn an_input_and_an_output_cannot_swap_ends() {
         let mut stream = alice_cam();
-        stream.source = StreamTransport::Output(LocalEndpoint {
+        stream.source = StreamTransport::Output(OutputEndpoint {
             node: "browser-a1b2".to_string(),
             id: "player".to_string(),
             network: None,
+            latency: None,
         });
         assert_eq!(
             derive(&stream, &webrtc_nodes()),

@@ -441,7 +441,7 @@ pub enum StreamTransport {
 
     Input(LocalEndpoint),
 
-    Output(LocalEndpoint),
+    Output(OutputEndpoint),
 
     Whip(SignallingEndpoint),
 
@@ -453,7 +453,8 @@ impl StreamTransport {
     pub fn node(&self) -> Option<&str> {
         match self {
             Self::Srt(endpoint) => endpoint.node.as_deref(),
-            Self::Input(endpoint) | Self::Output(endpoint) => Some(&endpoint.node),
+            Self::Input(endpoint) => Some(&endpoint.node),
+            Self::Output(endpoint) => Some(&endpoint.node),
             Self::Whip(endpoint) | Self::Whep(endpoint) => Some(&endpoint.node),
         }
     }
@@ -462,7 +463,8 @@ impl StreamTransport {
     pub fn network(&self) -> Option<&str> {
         match self {
             Self::Srt(endpoint) => endpoint.network.as_deref(),
-            Self::Input(endpoint) | Self::Output(endpoint) => endpoint.network.as_deref(),
+            Self::Input(endpoint) => endpoint.network.as_deref(),
+            Self::Output(endpoint) => endpoint.network.as_deref(),
             Self::Whip(endpoint) | Self::Whep(endpoint) => endpoint.network.as_deref(),
         }
     }
@@ -533,6 +535,28 @@ pub struct LocalEndpoint {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OutputEndpoint {
+    #[schemars(
+        length(min = 1, max = 63),
+        regex(pattern = r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+    )]
+    pub node: String,
+
+    #[schemars(
+        length(min = 1, max = 63),
+        regex(pattern = r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+    )]
+    pub id: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -3504,10 +3528,11 @@ mod tests {
         );
         assert_eq!(
             stream.destinations[0].endpoint,
-            StreamTransport::Output(LocalEndpoint {
+            StreamTransport::Output(OutputEndpoint {
                 node: "filips-mac".to_string(),
                 id: "speakers".to_string(),
                 network: None,
+                latency: None,
             })
         );
         assert_eq!(stream.source.node(), Some("browser-a1b2"));
@@ -3526,6 +3551,17 @@ mod tests {
             "input": { "node": "browser-a1b2", "id": "camera", "latency": 200 }
         }));
         assert!(with_latency.is_err(), "an input endpoint has no SRT fields");
+        let output: StreamTransport = serde_json::from_value(serde_json::json!({
+            "output": { "node": "filips-mac", "id": "speakers", "latency": 40 }
+        }))
+        .expect("an output takes the latency of the links that reach it");
+        assert!(matches!(
+            output,
+            StreamTransport::Output(OutputEndpoint {
+                latency: Some(40),
+                ..
+            })
+        ));
         let unnamed: Result<StreamTransport, _> = serde_json::from_value(serde_json::json!({
             "output": { "node": "filips-mac" }
         }));
